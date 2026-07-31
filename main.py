@@ -113,12 +113,12 @@ def chat_with_ultron(request: ChatRequest):
     try:
         # Generate content with live Google Search Grounding enabled using the latest stable model
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash", # <--- UPDATE THIS LINE
             contents=user_msg,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.7,
-                tools=[{"google_search": {}}]  # Live web search capabilities
+                tools=[{"google_search": {}}]  
             )
         )
 
