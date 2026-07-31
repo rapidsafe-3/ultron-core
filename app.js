@@ -1,181 +1,172 @@
-const BACKEND_URL = "/chat";
-const WAKE_WORD = "ultron";
-const SHUTDOWN_COMMANDS = ["shut down", "go to sleep", "sleep", "turn off", "power down", "bye"];
-
 const core = document.getElementById('ultron-core');
 const statusText = document.getElementById('status-text');
 const transcriptDisplay = document.getElementById('transcript-display');
 const initBtn = document.getElementById('init-btn');
 
-let isAwake = false;
+let mediaRecorder = null;
+let audioChunks = [];
+let currentAudioPlayer = null;
+let isRecording = false;
 let isProcessing = false;
-let isSpeaking = false;
-let speechSilenceTimer = null;
-
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const synth = window.speechSynthesis;
-
-if (!SpeechRecognition) {
-    statusText.innerText = "BROWSER UNSUPPORTED";
-    transcriptDisplay.innerText = "Please open directly in Google Chrome.";
-}
-
-const recognition = new SpeechRecognition();
-recognition.continuous = true;
-recognition.interimResults = true;
-recognition.lang = 'en-US';
 
 function setCoreState(stateClass, text) {
     core.className = stateClass;
     statusText.innerText = text;
 }
 
-function getNaturalVoice() {
-    const voices = synth.getVoices();
-    return voices.find(v => 
-        v.name.includes("Google US English") || 
-        v.name.includes("Natural") || 
-        v.name.includes("Enhanced") || 
-        (v.lang === "en-US" && !v.name.includes("Network"))
-    ) || voices[0];
-}
-
-function speak(text, shouldShutdown = false) {
-    // Cancel any previous speech
-    synth.cancel();
-    
-    isSpeaking = true;
+// Play incoming Neural MP3 audio stream from server
+async function playNeuralSpeech(text) {
     setCoreState('core-speaking', 'ULTRON');
     
-    const cleanText = text.replace(/[*_#`]/g, '');
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    
-    const preferredVoice = getNaturalVoice();
-    if (preferredVoice) utterance.voice = preferredVoice;
-
-    utterance.pitch = 1.0; 
-    utterance.rate = 1.05;
-
-    utterance.onend = () => {
-        isSpeaking = false;
-        
-        if (shouldShutdown) {
-            isAwake = false;
-            isProcessing = false;
-            setCoreState('core-idle', 'STANDBY');
-            transcriptDisplay.innerText = `Say "${WAKE_WORD.toUpperCase()}" to activate`;
-        } else {
-            isProcessing = false;
-            setCoreState('core-listening', 'LISTENING');
-            transcriptDisplay.innerText = "Listening...";
-        }
-    };
-
-    synth.speak(utterance);
-}
-
-async function sendToBackend(messageText) {
-    if (isProcessing || !messageText.trim()) return;
-
-    isProcessing = true;
-    setCoreState('core-processing', 'THINKING');
-
     try {
-        const response = await fetch(BACKEND_URL, {
+        const response = await fetch('/tts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: messageText })
+            body: JSON.stringify({ text: text })
         });
 
-        if (!response.ok) throw new Error("Backend error");
+        if (!response.ok) throw new Error("TTS Generation Failed");
 
-        const data = await response.json();
-        speak(data.response, false);
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        if (currentAudioPlayer) {
+            currentAudioPlayer.pause();
+        }
+
+        currentAudioPlayer = new Audio(audioUrl);
+        
+        currentAudioPlayer.onended = () => {
+            setCoreState('core-idle', 'READY');
+            transcriptDisplay.innerText = "Tap core or hold microphone to speak...";
+            isProcessing = false;
+        };
+
+        await currentAudioPlayer.play();
+
+    } catch (err) {
+        console.error("Audio playback error:", err);
+        setCoreState('core-idle', 'READY');
+        isProcessing = false;
+    }
+}
+
+// Send audio blob to Groq Whisper for instant transcription
+async function processRecordedAudio(blob) {
+    if (isProcessing) return;
+    isProcessing = true;
+
+    setCoreState('core-processing', 'TRANSCRIBING...');
+    transcriptDisplay.innerText = "Processing audio...";
+
+    const formData = new FormData();
+    formData.append('file', blob, 'recording.webm');
+
+    try {
+        // 1. Transcribe audio with Groq Whisper V3
+        const sttResponse = await fetch('/transcribe', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!sttResponse.ok) throw new Error("STT failed");
+
+        const sttData = await sttResponse.json();
+        const userText = sttData.text;
+
+        if (!userText || userText.length < 2) {
+            setCoreState('core-idle', 'READY');
+            transcriptDisplay.innerText = "Didn't hear clearly. Try again.";
+            isProcessing = false;
+            return;
+        }
+
+        transcriptDisplay.innerText = `"${userText}"`;
+        setCoreState('core-processing', 'THINKING...');
+
+        // 2. Query Ultron Brain
+        const chatResponse = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: userText })
+        });
+
+        if (!chatResponse.ok) throw new Error("Chat failed");
+
+        const chatData = await chatResponse.json();
+        
+        // 3. Play Neural Voice Response
+        await playNeuralSpeech(chatData.response);
 
     } catch (error) {
         console.error(error);
-        speak("Connection glitch. Say that again?", false);
+        setCoreState('core-idle', 'READY');
+        transcriptDisplay.innerText = "System error processing voice.";
+        isProcessing = false;
     }
 }
 
-recognition.onresult = (event) => {
-    // INSTANT INTERRUPTION: If Ultron is talking and you speak, cut his audio immediately!
-    if (isSpeaking) {
-        synth.cancel();
-        isSpeaking = false;
+// Start audio recording
+async function startRecording() {
+    if (isProcessing || isRecording) return;
+
+    // Interrupt Ultron if speaking
+    if (currentAudioPlayer) {
+        currentAudioPlayer.pause();
+        currentAudioPlayer = null;
     }
 
-    let finalTranscript = "";
-    let interimTranscript = "";
-
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcriptChunk = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-            finalTranscript += transcriptChunk;
-        } else {
-            interimTranscript += transcriptChunk;
-        }
-    }
-
-    let currentText = (finalTranscript || interimTranscript).trim();
-    if (!currentText) return;
-
-    transcriptDisplay.innerText = `"${currentText}"`;
-
-    const lowerText = currentText.toLowerCase();
-
-    // 1. Activation
-    if (!isAwake) {
-        if (lowerText.includes(WAKE_WORD)) {
-            isAwake = true;
-            speak("Online. What do you need?");
-        }
-        return;
-    }
-
-    // 2. Shutdown
-    const isShutdownReq = SHUTDOWN_COMMANDS.some(cmd => lowerText.includes(cmd));
-    if (isAwake && isShutdownReq && !isProcessing) {
-        isProcessing = true;
-        clearTimeout(speechSilenceTimer);
-        speak("Going into standby.", true);
-        return;
-    }
-
-    // 3. Silence Buffer for full sentence capture without duplication
-    if (isAwake && !isProcessing && finalTranscript.length > 0) {
-        clearTimeout(speechSilenceTimer);
-        speechSilenceTimer = setTimeout(() => {
-            let cleanMsg = finalTranscript.replace(new RegExp(WAKE_WORD, "gi"), "").trim();
-            if (cleanMsg.length > 0) {
-                sendToBackend(cleanMsg);
-            }
-        }, 1200); // 1.2 second pause triggers send
-    }
-};
-
-recognition.onerror = (e) => {
-    if (e.error === 'not-allowed') {
-        statusText.innerText = "MIC PERMISSION DENIED";
-    }
-};
-
-recognition.onend = () => {
-    try { recognition.start(); } catch (e) {}
-};
-
-if (speechSynthesis.onvoiceschanged !== undefined) {
-    speechSynthesis.onvoiceschanged = getNaturalVoice;
-}
-
-initBtn.addEventListener('click', () => {
     try {
-        recognition.start();
-        initBtn.style.display = 'none';
-        setCoreState('core-idle', 'STANDBY');
-        transcriptDisplay.innerText = `Say "${WAKE_WORD.toUpperCase()}" to activate`;
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            processRecordedAudio(audioBlob);
+            // Stop mic track to save battery
+            stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        setCoreState('core-listening', 'LISTENING...');
+        transcriptDisplay.innerText = "Recording voice...";
+
     } catch (err) {
-        alert("Please open this link directly in Google Chrome!");
+        alert("Microphone access required!");
+        console.error(err);
+    }
+}
+
+// Stop audio recording
+function stopRecording() {
+    if (mediaRecorder && isRecording) {
+        isRecording = false;
+        mediaRecorder.stop();
+    }
+}
+
+// UI Event Listeners
+initBtn.addEventListener('click', () => {
+    initBtn.style.display = 'none';
+    setCoreState('core-idle', 'READY');
+    transcriptDisplay.innerText = "Tap core to start/stop talking";
+});
+
+// Tap core to toggle mic recording
+core.addEventListener('click', () => {
+    if (initBtn.style.display !== 'none') return;
+
+    if (!isRecording) {
+        startRecording();
+    } else {
+        stopRecording();
     }
 });
-    
