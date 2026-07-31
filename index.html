@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultron HUD</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- The visual representation of Ultron -->
+        <div id="ultron-core" class="core-idle">
+            <div class="inner-core"></div>
+        </div>
+        
+        <!-- Status and transcript display -->
+        <div class="status-panel">
+            <h1 id="status-text">SYSTEM OFFLINE</h1>
+            <p id="transcript-display">Awaiting activation...</p>
+        </div>
+
+        <!-- Hidden button to initialize audio context (Browsers require user interaction before playing audio) -->
+        <button id="init-btn">INITIALIZE CORE</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
