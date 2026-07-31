@@ -85,13 +85,11 @@ def serve_js():
 @app.post("/chat")
 def chat_with_ultron(request: ChatRequest):
     if not client:
-        # Instead of throwing a hard 500 error, Ultron speaks the error.
         return {"response": "Core system error. AI client is offline."}
 
     user_msg = request.message.strip()
     memory_context = get_user_memory()
 
-    # CORE BRAIN PROMPT WITH CREATOR IDENTITY
     system_instruction = f"""
     You are Ultron, a highly capable, intelligent, and natural Personal AI Assistant.
     Your creator is Mohammed Saqib Ahmed, an 18-year-old developer based in Bangalore.
@@ -111,14 +109,14 @@ def chat_with_ultron(request: ChatRequest):
     """
 
     try:
-        # Generate content with live Google Search Grounding enabled using the latest stable model
+        # Use the latest stable model
         response = client.models.generate_content(
-            model="gemini-2.5-flash", # <--- UPDATE THIS LINE
+            model="gemini-2.5-flash",
             contents=user_msg,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.7,
-                tools=[{"google_search": {}}]  
+                tools=[{"google_search": {}}]
             )
         )
 
