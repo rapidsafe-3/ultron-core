@@ -1,0 +1,125 @@
+:root {
+    --core-idle: #ff0033;       /* Ultron Crimson Red */
+    --core-listening: #ff3300;  /* Fiery Orange Red */
+    --core-processing: #990022; /* Dark Blood Red */
+    --core-speaking: #ffffff;   /* Pure White Glow */
+    --bg-color: #030005;
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background-color: var(--bg-color);
+    font-family: 'Courier New', Courier, monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #ff3344;
+    overflow: hidden;
+}
+
+.container {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 35px;
+}
+
+/* The Glowing Red Ultron Core */
+#ultron-core {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    border: 4px solid var(--core-idle);
+    box-shadow: 0 0 35px var(--core-idle), inset 0 0 35px var(--core-idle);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.3s ease;
+}
+
+.inner-core {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background-color: var(--core-idle);
+    opacity: 0.3;
+    transition: all 0.3s ease;
+}
+
+/* Dynamic Core States */
+.core-idle { 
+    border-color: var(--core-idle) !important; 
+    box-shadow: 0 0 30px var(--core-idle), inset 0 0 30px var(--core-idle) !important; 
+}
+
+.core-listening { 
+    border-color: var(--core-listening) !important; 
+    box-shadow: 0 0 60px var(--core-listening), inset 0 0 60px var(--core-listening) !important; 
+    transform: scale(1.08); 
+}
+
+.core-processing { 
+    border-color: var(--core-processing) !important; 
+    box-shadow: 0 0 40px var(--core-processing), inset 0 0 40px var(--core-processing) !important; 
+    animation: pulse 0.8s infinite; 
+}
+
+.core-speaking { 
+    border-color: var(--core-speaking) !important; 
+    box-shadow: 0 0 70px #ff0033, inset 0 0 50px #ff0033 !important; 
+    animation: pulse 0.4s infinite; 
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.06); }
+    100% { transform: scale(1); }
+}
+
+/* Text Panel */
+.status-panel {
+    background: rgba(15, 0, 5, 0.85);
+    padding: 20px;
+    border: 1px solid #ff003344;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 500px;
+    box-shadow: 0 0 15px rgba(255, 0, 51, 0.2);
+}
+
+#status-text {
+    margin: 0 0 10px 0;
+    font-size: 1.4rem;
+    letter-spacing: 3px;
+    color: #ff2244;
+    text-shadow: 0 0 10px #ff0033;
+}
+
+#transcript-display {
+    color: #ffcccc;
+    font-size: 1.1rem;
+    min-height: 25px;
+}
+
+#init-btn {
+    padding: 15px 30px;
+    background: rgba(255, 0, 51, 0.1);
+    color: #ff2244;
+    border: 2px solid #ff0033;
+    font-family: inherit;
+    font-size: 1.1rem;
+    font-weight: bold;
+    letter-spacing: 2px;
+    cursor: pointer;
+    border-radius: 5px;
+    box-shadow: 0 0 15px rgba(255, 0, 51, 0.4);
+    transition: all 0.3s;
+}
+
+#init-btn:active {
+    background: #ff0033;
+    color: #000;
+}
