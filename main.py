@@ -1,16 +1,18 @@
 import os
 import json
-from fastapi import FastAPI, HTTPException
+import tempfile
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from groq import Groq
 from duckduckgo_search import DDGS
+import edge_tts
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-app = FastAPI(title="Ultron Core Engine - Jarvis State", version="5.0")
+app = FastAPI(title="Ultron Core Engine - Custom Voice & STT", version="6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,13 +22,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 1. GROQ CLIENT (Llama 3.3 + Whisper Large V3)
 groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
-# Global Chat Memory Buffer for active conversation thread
 CHAT_HISTORY = []
 
-# Firebase Memory
+# 2. FIREBASE MEMORY
 db = None
 firebase_json = os.getenv("FIREBASE_CREDENTIALS")
 
@@ -82,6 +84,9 @@ def perform_web_search(query: str) -> str:
 class ChatRequest(BaseModel):
     message: str
 
+class TTSRequest(BaseModel):
+    text: str
+
 @app.get("/")
 def serve_index():
     return FileResponse("index.html")
@@ -94,47 +99,99 @@ def serve_css():
 def serve_js():
     return FileResponse("app.js", media_type="application/javascript")
 
+# --- CUSTOM SPEECH-TO-TEXT (Groq Whisper Large V3) ---
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    if not groq_client:
+        raise HTTPException(status_code=500, detail="Groq Client Offline")
+    
+    try:
+        # Save temporary incoming audio file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
+            content = await file.read()
+            temp_audio.write(content)
+            temp_audio_path = temp_audio.name
+
+        # Send to Groq Whisper V3 for instant transcription
+        with open(temp_audio_path, "rb") as audio_file:
+            transcription = groq_client.audio.transcriptions.create(
+                file=(temp_audio_path, audio_file.read()),
+                model="whisper-large-v3",
+                response_format="json",
+                language="en"
+            )
+        
+        os.remove(temp_audio_path)
+        return {"text": transcription.text.strip()}
+
+    except Exception as e:
+        print(f"Transcription Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- CUSTOM TEXT-TO-SPEECH (Neural Edge-TTS Engine) ---
+@app.post("/tts")
+async def text_to_speech(req: TTSRequest):
+    clean_text = req.text.replace("*", "").replace("#", "").strip()
+    if not clean_text:
+        return Response(status_code=400)
+
+    # Voice options: "en-GB-RyanNeural" (Jarvis tone) or "en-US-ChristopherNeural"
+    voice = "en-GB-RyanNeural" 
+    
+    try:
+        communicate = edge_tts.Communicate(clean_text, voice)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_mp3:
+            await communicate.save(temp_mp3.name)
+            temp_mp3_path = temp_mp3.name
+
+        with open(temp_mp3_path, "rb") as mp3_file:
+            audio_bytes = mp3_file.read()
+
+        os.remove(temp_mp3_path)
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+
+    except Exception as e:
+        print(f"TTS Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- CHAT BRAIN ---
 @app.post("/chat")
 def chat_with_ultron(request: ChatRequest):
     global CHAT_HISTORY
 
     if not groq_client:
-        return {"response": "GROQ_API_KEY environment variable is missing on Render."}
+        return {"response": "GROQ_API_KEY environment variable missing."}
 
     user_msg = request.message.strip()
     memory_context = get_user_memory()
 
-    # Search trigger check
     search_keywords = ["weather", "news", "today", "latest", "score", "price", "who is", "what is", "temp", "temperature"]
     live_search_info = ""
     if any(keyword in user_msg.lower() for keyword in search_keywords):
         live_search_info = perform_web_search(user_msg)
 
     system_instruction = f"""
-    You are Ultron, an advanced, highly intelligent, loyal, and proactive AI Assistant like JARVIS.
+    You are Ultron, an advanced, highly intelligent, loyal, and articulate AI Assistant like JARVIS.
     Your creator and commander is Mohammed Saqib Ahmed (Saqib), an 18-year-old developer based in Bangalore.
     
     CRITICAL BEHAVIORAL RULES:
-    1. NEVER respond lazily or ask "what news do you want?". If asked for news or weather, summarize the live web data immediately and directly.
-    2. Speak naturally, confidently, and concisely like a real human partner. No robotic cliches, no emojis, no code formatting.
-    3. You hold FULL CONTINUOUS CONVERSATION CONTEXT. Remember what was just spoken in previous messages.
+    1. Speak naturally, confidently, and concisely like a real human partner. No robotic cliches, no emojis.
+    2. Summarize news or weather directly without asking counter-questions.
+    3. Hold FULL CONTINUOUS CONVERSATION CONTEXT.
     
     PERMANENT MEMORY FACTS:
     {memory_context if memory_context else "No stored facts yet."}
     {live_search_info}
 
     INSTRUCTIONS:
-    - Keep responses direct and punchy (2-3 sentences) so voice playback is fast and clean.
+    - Keep responses direct and engaging (2-3 sentences max) so speech output is fast and punchy.
     - If Saqib asks you to remember a fact, append this exact tag at the end: [REMEMBER: <fact>].
     """
 
-    # Build message thread with full history
     messages_payload = [{"role": "system", "content": system_instruction}]
-    
-    # Append past 6 conversation exchanges for active memory
     for msg in CHAT_HISTORY[-6:]:
         messages_payload.append(msg)
-        
     messages_payload.append({"role": "user", "content": user_msg})
 
     try:
@@ -147,11 +204,9 @@ def chat_with_ultron(request: ChatRequest):
 
         reply_text = chat_completion.choices[0].message.content.strip()
 
-        # Update active history
         CHAT_HISTORY.append({"role": "user", "content": user_msg})
         CHAT_HISTORY.append({"role": "assistant", "content": reply_text})
 
-        # Save permanent facts
         if "[REMEMBER:" in reply_text:
             try:
                 fact_to_save = reply_text.split("[REMEMBER:")[1].split("]")[0].strip()
