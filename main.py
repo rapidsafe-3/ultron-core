@@ -28,18 +28,25 @@ except Exception as e:
     print(f"Gemini Init Error: {e}")
     client = None
 
-# 2. INITIALIZE FIREBASE LONG-TERM MEMORY
+# 2. INITIALIZE FIREBASE LONG-TERM MEMORY (SAFE STARTUP)
 db = None
 firebase_json = os.getenv("FIREBASE_CREDENTIALS")
+
 if firebase_json:
     try:
-        cred_dict = json.loads(firebase_json)
+        # Strip any accidental leading/trailing whitespace before parsing
+        clean_json = firebase_json.strip()
+        cred_dict = json.loads(clean_json)
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
         db = firestore.client()
         print("Firebase Long-Term Memory connected successfully.")
     except Exception as e:
-        print(f"Firebase Init Error: {e}")
+        # This prevents the server from crashing on startup if the JSON is bad
+        print(f"CRITICAL: Firebase Init Error: {e}")
+        db = None
+else:
+    print("WARNING: FIREBASE_CREDENTIALS environment variable not found.")
 
 # Helper functions for Long-Term Memory
 def get_user_memory():
