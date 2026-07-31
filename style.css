@@ -1,8 +1,8 @@
 :root {
-    --core-idle: #ff0033;       /* Ultron Crimson Red */
-    --core-listening: #ff3300;  /* Fiery Orange Red */
-    --core-processing: #990022; /* Dark Blood Red */
-    --core-speaking: #ffffff;   /* Pure White Glow */
+    --core-idle: #ff0033;
+    --core-listening: #ff3300;
+    --core-processing: #990022;
+    --core-speaking: #ffffff;
     --bg-color: #030005;
 }
 
@@ -27,7 +27,6 @@ body, html {
     gap: 35px;
 }
 
-/* The Glowing Red Ultron Core */
 #ultron-core {
     width: 200px;
     height: 200px;
@@ -49,7 +48,6 @@ body, html {
     transition: all 0.3s ease;
 }
 
-/* Dynamic Core States */
 .core-idle { 
     border-color: var(--core-idle) !important; 
     box-shadow: 0 0 30px var(--core-idle), inset 0 0 30px var(--core-idle) !important; 
@@ -79,7 +77,6 @@ body, html {
     100% { transform: scale(1); }
 }
 
-/* Text Panel */
 .status-panel {
     background: rgba(15, 0, 5, 0.85);
     padding: 20px;
@@ -116,10 +113,4 @@ body, html {
     cursor: pointer;
     border-radius: 5px;
     box-shadow: 0 0 15px rgba(255, 0, 51, 0.4);
-    transition: all 0.3s;
-}
-
-#init-btn:active {
-    background: #ff0033;
-    color: #000;
 }
