@@ -1,6 +1,6 @@
-const BACKEND_URL = "http://127.0.0.1:8000/chat"; 
+const BACKEND_URL = "/chat"; 
 const WAKE_WORD = "ultron";
-const SHUTDOWN_COMMANDS = ["shut down", "ultron shut down", "go to sleep", "sleep", "turn off"];
+const SHUTDOWN_COMMANDS = ["shut down", "go to sleep", "sleep", "turn off"];
 
 const core = document.getElementById('ultron-core');
 const statusText = document.getElementById('status-text');
@@ -16,7 +16,7 @@ const synth = window.speechSynthesis;
 
 if (!SpeechRecognition) {
     statusText.innerText = "MIC NOT SUPPORTED";
-    transcriptDisplay.innerText = "Use Google Chrome on Android directly.";
+    transcriptDisplay.innerText = "Use Google Chrome directly.";
 }
 
 const recognition = new SpeechRecognition();
@@ -29,13 +29,12 @@ function setCoreState(stateClass, text) {
     statusText.innerText = text;
 }
 
-// Function to speak text without shutting down the session
 function speak(text, shouldShutdown = false) {
     isSpeaking = true;
     setCoreState('core-speaking', 'ULTRON RESPONDING');
     
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.pitch = 0.8; // Deep, commanding tone
+    utterance.pitch = 0.8;
     utterance.rate = 1.0;
 
     utterance.onend = () => {
@@ -47,7 +46,6 @@ function speak(text, shouldShutdown = false) {
             setCoreState('core-idle', 'SYSTEM OFFLINE');
             transcriptDisplay.innerText = `Say "${WAKE_WORD.toUpperCase()}" to wake me up.`;
         } else {
-            // STAY AWAKE and immediately start listening for your next command!
             isProcessing = false;
             setCoreState('core-listening', 'ACTIVE & LISTENING...');
             transcriptDisplay.innerText = "I am listening...";
@@ -58,7 +56,6 @@ function speak(text, shouldShutdown = false) {
 }
 
 recognition.onresult = async (event) => {
-    // Ignore input if Ultron is currently talking to avoid hearing himself
     if (isSpeaking) return;
 
     let transcript = "";
@@ -68,7 +65,6 @@ recognition.onresult = async (event) => {
 
     transcriptDisplay.innerText = `"${transcript}"`;
 
-    // 1. WAKE UP LOGIC (If currently asleep)
     if (!isAwake) {
         if (transcript.includes(WAKE_WORD)) {
             isAwake = true;
@@ -77,17 +73,14 @@ recognition.onresult = async (event) => {
         return;
     }
 
-    // 2. SHUTDOWN LOGIC (If awake and you command him to sleep)
     const isShutdownReq = SHUTDOWN_COMMANDS.some(cmd => transcript.includes(cmd));
     if (isAwake && isShutdownReq && !isProcessing) {
         isProcessing = true;
-        speak("Deactivating systems. Goodbye.", true); // True triggers sleep
+        speak("Deactivating systems. Goodbye.", true);
         return;
     }
 
-    // 3. CONTINUOUS CONVERSATION LOGIC (If awake and you ask anything)
     if (isAwake && !isProcessing && event.results[event.results.length - 1].isFinal) {
-        // Strip the wake word if you happen to say it again
         const cleanCommand = transcript.replace(WAKE_WORD, "").trim();
         if (!cleanCommand) return;
 
@@ -101,10 +94,10 @@ recognition.onresult = async (event) => {
                 body: JSON.stringify({ message: cleanCommand })
             });
 
-            if (!response.ok) throw new Error("Backend offline");
+            if (!response.ok) throw new Error("Offline");
 
             const data = await response.json();
-            speak(data.response, false); // Keep awake after speaking!
+            speak(data.response, false);
 
         } catch (error) {
             console.error(error);
@@ -121,7 +114,6 @@ recognition.onerror = (e) => {
 };
 
 recognition.onend = () => {
-    // Force recognition to stay running continuously in background
     try { recognition.start(); } catch (e) {}
 };
 
@@ -132,6 +124,6 @@ initBtn.addEventListener('click', () => {
         setCoreState('core-idle', 'AWAITING WAKE WORD');
         transcriptDisplay.innerText = `Say "${WAKE_WORD.toUpperCase()}" to activate`;
     } catch (err) {
-        alert("Microphone error. Tap debug view or open directly in Chrome!");
+        alert("Microphone error. Open page directly in Chrome!");
     }
 });
