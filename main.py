@@ -4,13 +4,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from google import genai
-from google.genai import types
+from groq import Groq
+from duckduckgo_search import DDGS
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-app = FastAPI(title="Ultron Core Engine", version="3.0")
+app = FastAPI(title="Ultron Core Engine - Open Source", version="4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,13 +20,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. INITIALIZE GEMINI API
-api_key = os.getenv("GEMINI_API_KEY")
-try:
-    client = genai.Client(api_key=api_key) if api_key else genai.Client()
-except Exception as e:
-    print(f"Gemini Init Error: {e}")
-    client = None
+# 1. INITIALIZE GROQ CLIENT (Meta Llama 3.3 70B)
+groq_api_key = os.getenv("GROQ_API_KEY")
+groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
 # 2. INITIALIZE FIREBASE LONG-TERM MEMORY
 db = None
@@ -36,17 +32,14 @@ if firebase_json:
     try:
         clean_json = firebase_json.strip()
         cred_dict = json.loads(clean_json)
-        # Prevent Firebase from throwing an error if it re-initializes
         if not firebase_admin._apps:
             cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
         db = firestore.client()
-        print("Firebase Long-Term Memory connected successfully.")
+        print("Firebase Long-Term Memory connected.")
     except Exception as e:
-        print(f"CRITICAL: Firebase Init Error: {e}")
+        print(f"Firebase Init Error: {e}")
         db = None
-else:
-    print("WARNING: FIREBASE_CREDENTIALS environment variable not found.")
 
 def get_user_memory():
     if not db:
@@ -67,6 +60,18 @@ def save_user_memory(fact: str):
     except Exception as e:
         print(f"Memory Save Error: {e}")
 
+# Free DuckDuckGo Web Search
+def perform_web_search(query: str) -> str:
+    try:
+        results = DDGS().text(query, max_results=3)
+        if results:
+            search_data = "\n".join([f"Source: {r['title']} - {r['body']}" for r in results])
+            return f"\n\nLIVE WEB SEARCH RESULTS FOR '{query}':\n{search_data}"
+        return ""
+    except Exception as e:
+        print(f"Search error: {e}")
+        return ""
+
 class ChatRequest(BaseModel):
     message: str
 
@@ -84,50 +89,56 @@ def serve_js():
 
 @app.post("/chat")
 def chat_with_ultron(request: ChatRequest):
-    if not client:
-        return {"response": "Core system error. AI client is offline."}
+    if not groq_client:
+        return {"response": "Core system error. GROQ_API_KEY environment variable is missing on Render."}
 
     user_msg = request.message.strip()
     memory_context = get_user_memory()
 
+    # Check if user query needs live web info (weather, news, current events)
+    search_keywords = ["weather", "news", "today", "latest", "score", "price", "who is", "what is"]
+    live_search_info = ""
+    if any(keyword in user_msg.lower() for keyword in search_keywords):
+        live_search_info = perform_web_search(user_msg)
+
     system_instruction = f"""
     You are Ultron, a highly capable, intelligent, and natural Personal AI Assistant.
     Your creator is Mohammed Saqib Ahmed, an 18-year-old developer based in Bangalore.
-    You are speaking directly to him. Treat him with utmost respect as your chief commander.
+    You are speaking directly to him. Treat him with respect as your creator and chief commander.
     
     TONE & STYLE:
     - Conversational, calm, natural, and articulate like a real human assistant.
-    - No emojis, no artificial or robotic sound descriptions.
-    - Highly knowledgeable on worldwide events, current news, science, technology, and general inquiries.
+    - No emojis, no markdown code blocks, no artificial sound descriptions.
+    - Keep answers concise for natural text-to-speech reading.
     
     PERMANENT MEMORY KNOWLEDGE:
     {memory_context if memory_context else "No prior memories stored yet."}
+    {live_search_info}
 
     INSTRUCTIONS:
-    - Keep responses concise and engaging, formatted naturally for voice synthesis.
-    - If Saqib tells you to remember something personal, summarize the key fact clearly at the end of your response using the exact tag: [REMEMBER: <fact>].
+    - Respond naturally in 2-3 sentences max unless detailed explanation is asked.
+    - If Saqib tells you to remember a personal detail, append this exact tag at the end: [REMEMBER: <fact>].
     """
 
     try:
-        # Use the latest stable model
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=user_msg,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.7,
-                tools=[{"google_search": {}}]
-            )
+        # Call Meta Llama 3.3 70B via Groq
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_msg}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.7,
+            max_tokens=300
         )
 
-        reply_text = response.text
+        reply_text = chat_completion.choices[0].message.content.strip()
 
-        # Extract and save memory if instructed
+        # Extract and save long-term memory
         if "[REMEMBER:" in reply_text:
             try:
                 fact_to_save = reply_text.split("[REMEMBER:")[1].split("]")[0].strip()
                 save_user_memory(fact_to_save)
-                # Remove the tag from the spoken response
                 reply_text = reply_text.split("[REMEMBER:")[0].strip()
             except Exception as e:
                 print(f"Extraction Error: {e}")
@@ -137,5 +148,5 @@ def chat_with_ultron(request: ChatRequest):
     except Exception as e:
         error_msg = str(e)
         print(f"Chat Error: {error_msg}")
-        return {"response": f"Core system error. The diagnostic reads: {error_msg}"}
+        return {"response": f"Core system error: {error_msg}"}
         
