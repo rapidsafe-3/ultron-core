@@ -1,6 +1,6 @@
 const BACKEND_URL = "/chat";
 const WAKE_WORD = "ultron";
-const SHUTDOWN_COMMANDS = ["shut down", "go to sleep", "sleep", "turn off", "power down"];
+const SHUTDOWN_COMMANDS = ["shut down", "go to sleep", "sleep", "turn off", "power down", "bye"];
 
 const core = document.getElementById('ultron-core');
 const statusText = document.getElementById('status-text');
@@ -10,6 +10,9 @@ const initBtn = document.getElementById('init-btn');
 let isAwake = false;
 let isProcessing = false;
 let isSpeaking = false;
+
+let speechSilenceTimer = null;
+let fullSpeechBuffer = "";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const synth = window.speechSynthesis;
@@ -29,10 +32,8 @@ function setCoreState(stateClass, text) {
     statusText.innerText = text;
 }
 
-// Select natural human voice
 function getNaturalVoice() {
     const voices = synth.getVoices();
-    // Prioritize natural high-quality human voices available in Android/Chrome
     return voices.find(v => 
         v.name.includes("Google US English") || 
         v.name.includes("Natural") || 
@@ -52,11 +53,12 @@ function speak(text, shouldShutdown = false) {
     const preferredVoice = getNaturalVoice();
     if (preferredVoice) utterance.voice = preferredVoice;
 
-    utterance.pitch = 1.0; // Natural pitch
-    utterance.rate = 1.0;  // Natural speech pace
+    utterance.pitch = 1.0; 
+    utterance.rate = 1.05; // Slightly conversational speed
 
     utterance.onend = () => {
         isSpeaking = false;
+        fullSpeechBuffer = "";
         
         if (shouldShutdown) {
             isAwake = false;
@@ -73,58 +75,87 @@ function speak(text, shouldShutdown = false) {
     synth.speak(utterance);
 }
 
-recognition.onresult = async (event) => {
-    // Avoid listening to own voice output
+// Function to send complete speech to backend
+async function sendToBackend(messageText) {
+    if (isProcessing || !messageText.trim()) return;
+
+    isProcessing = true;
+    setCoreState('core-processing', 'THINKING');
+
+    try {
+        const response = await fetch(BACKEND_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: messageText })
+        });
+
+        if (!response.ok) throw new Error("Backend error");
+
+        const data = await response.json();
+        speak(data.response, false);
+
+    } catch (error) {
+        console.error(error);
+        speak("I ran into an issue connecting to core services. Let me try again.", false);
+    }
+}
+
+recognition.onresult = (event) => {
     if (isSpeaking) return;
 
-    let transcript = "";
+    let interimTranscript = "";
+    let finalTranscriptThisChunk = "";
+
     for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript.toLowerCase();
+        if (event.results[i].isFinal) {
+            finalTranscriptThisChunk += event.results[i][0].transcript + " ";
+        } else {
+            interimTranscript += event.results[i][0].transcript;
+        }
     }
 
-    transcriptDisplay.innerText = `"${transcript}"`;
+    if (finalTranscriptThisChunk) {
+        fullSpeechBuffer += finalTranscriptThisChunk;
+    }
 
-    // 1. Activation
+    let liveDisplay = (fullSpeechBuffer + interimTranscript).trim().toLowerCase();
+    if (liveDisplay) {
+        transcriptDisplay.innerText = `"${liveDisplay}"`;
+    }
+
+    // 1. Activation Check
     if (!isAwake) {
-        if (transcript.includes(WAKE_WORD)) {
+        if (liveDisplay.includes(WAKE_WORD)) {
             isAwake = true;
-            speak("Online and ready. How can I assist you?");
+            fullSpeechBuffer = "";
+            speak("Hey there! I'm awake. What's on your mind?");
         }
         return;
     }
 
-    // 2. Shutdown
-    const isShutdownReq = SHUTDOWN_COMMANDS.some(cmd => transcript.includes(cmd));
+    // 2. Shutdown Check
+    const isShutdownReq = SHUTDOWN_COMMANDS.some(cmd => liveDisplay.includes(cmd));
     if (isAwake && isShutdownReq && !isProcessing) {
         isProcessing = true;
-        speak("Entering standby mode.", true);
+        fullSpeechBuffer = "";
+        clearTimeout(speechSilenceTimer);
+        speak("Going into standby mode. Catch you later!", true);
         return;
     }
 
-    // 3. Continuous Conversation
-    if (isAwake && !isProcessing && event.results[event.results.length - 1].isFinal) {
-        const cleanCommand = transcript.replace(WAKE_WORD, "").trim();
-        if (!cleanCommand) return;
+    // 3. Smart Silence Buffer: Waits 1.8 seconds of complete silence before sending!
+    if (isAwake && !isProcessing) {
+        clearTimeout(speechSilenceTimer);
+        speechSilenceTimer = setTimeout(() => {
+            let completeMessage = (fullSpeechBuffer + interimTranscript).trim();
+            // Remove wake word from message body if spoken
+            completeMessage = completeMessage.replace(new RegExp(WAKE_WORD, "gi"), "").trim();
 
-        isProcessing = true;
-        setCoreState('core-processing', 'THINKING');
-
-        try {
-            const response = await fetch(BACKEND_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: cleanCommand })
-            });
-
-            if (!response.ok) throw new Error("Backend error");
-
-            const data = await response.json();
-            speak(data.response, false);
-
-        } catch (error) {
-            console.error(error);
-            speak("I am unable to connect to core services right now.", false);
-        }
+            if (completeMessage.length > 0) {
+                fullSpeechBuffer = "";
+                sendToBackend(completeMessage);
+            }
+        }, 1800); // 1.8 second delay ensures full sentence capture
     }
 };
 
@@ -138,7 +169,6 @@ recognition.onend = () => {
     try { recognition.start(); } catch (e) {}
 };
 
-// Ensure voices are loaded
 if (speechSynthesis.onvoiceschanged !== undefined) {
     speechSynthesis.onvoiceschanged = getNaturalVoice;
 }
