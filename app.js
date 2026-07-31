@@ -1,6 +1,6 @@
-const BACKEND_URL = "/chat"; 
+const BACKEND_URL = "/chat";
 const WAKE_WORD = "ultron";
-const SHUTDOWN_COMMANDS = ["shut down", "go to sleep", "sleep", "turn off"];
+const SHUTDOWN_COMMANDS = ["shut down", "go to sleep", "sleep", "turn off", "power down"];
 
 const core = document.getElementById('ultron-core');
 const statusText = document.getElementById('status-text');
@@ -15,8 +15,8 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const synth = window.speechSynthesis;
 
 if (!SpeechRecognition) {
-    statusText.innerText = "MIC NOT SUPPORTED";
-    transcriptDisplay.innerText = "Use Google Chrome directly.";
+    statusText.innerText = "BROWSER UNSUPPORTED";
+    transcriptDisplay.innerText = "Please open directly in Google Chrome.";
 }
 
 const recognition = new SpeechRecognition();
@@ -29,13 +29,31 @@ function setCoreState(stateClass, text) {
     statusText.innerText = text;
 }
 
+// Select natural human voice
+function getNaturalVoice() {
+    const voices = synth.getVoices();
+    // Prioritize natural high-quality human voices available in Android/Chrome
+    return voices.find(v => 
+        v.name.includes("Google US English") || 
+        v.name.includes("Natural") || 
+        v.name.includes("Enhanced") || 
+        (v.lang === "en-US" && !v.name.includes("Network"))
+    ) || voices[0];
+}
+
 function speak(text, shouldShutdown = false) {
     isSpeaking = true;
-    setCoreState('core-speaking', 'ULTRON RESPONDING');
+    setCoreState('core-speaking', 'ULTRON');
     
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.pitch = 0.8;
-    utterance.rate = 1.0;
+    // Clean text of markdown formatting for natural voice output
+    const cleanText = text.replace(/[*_#`]/g, '');
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    
+    const preferredVoice = getNaturalVoice();
+    if (preferredVoice) utterance.voice = preferredVoice;
+
+    utterance.pitch = 1.0; // Natural pitch
+    utterance.rate = 1.0;  // Natural speech pace
 
     utterance.onend = () => {
         isSpeaking = false;
@@ -43,12 +61,12 @@ function speak(text, shouldShutdown = false) {
         if (shouldShutdown) {
             isAwake = false;
             isProcessing = false;
-            setCoreState('core-idle', 'SYSTEM OFFLINE');
-            transcriptDisplay.innerText = `Say "${WAKE_WORD.toUpperCase()}" to wake me up.`;
+            setCoreState('core-idle', 'STANDBY');
+            transcriptDisplay.innerText = `Say "${WAKE_WORD.toUpperCase()}" to activate`;
         } else {
             isProcessing = false;
-            setCoreState('core-listening', 'ACTIVE & LISTENING...');
-            transcriptDisplay.innerText = "I am listening...";
+            setCoreState('core-listening', 'LISTENING');
+            transcriptDisplay.innerText = "Listening...";
         }
     };
 
@@ -56,6 +74,7 @@ function speak(text, shouldShutdown = false) {
 }
 
 recognition.onresult = async (event) => {
+    // Avoid listening to own voice output
     if (isSpeaking) return;
 
     let transcript = "";
@@ -65,27 +84,30 @@ recognition.onresult = async (event) => {
 
     transcriptDisplay.innerText = `"${transcript}"`;
 
+    // 1. Activation
     if (!isAwake) {
         if (transcript.includes(WAKE_WORD)) {
             isAwake = true;
-            speak("I am online. What do you require?");
+            speak("Online and ready. How can I assist you?");
         }
         return;
     }
 
+    // 2. Shutdown
     const isShutdownReq = SHUTDOWN_COMMANDS.some(cmd => transcript.includes(cmd));
     if (isAwake && isShutdownReq && !isProcessing) {
         isProcessing = true;
-        speak("Deactivating systems. Goodbye.", true);
+        speak("Entering standby mode.", true);
         return;
     }
 
+    // 3. Continuous Conversation
     if (isAwake && !isProcessing && event.results[event.results.length - 1].isFinal) {
         const cleanCommand = transcript.replace(WAKE_WORD, "").trim();
         if (!cleanCommand) return;
 
         isProcessing = true;
-        setCoreState('core-processing', 'PROCESSING...');
+        setCoreState('core-processing', 'THINKING');
 
         try {
             const response = await fetch(BACKEND_URL, {
@@ -94,20 +116,19 @@ recognition.onresult = async (event) => {
                 body: JSON.stringify({ message: cleanCommand })
             });
 
-            if (!response.ok) throw new Error("Offline");
+            if (!response.ok) throw new Error("Backend error");
 
             const data = await response.json();
             speak(data.response, false);
 
         } catch (error) {
             console.error(error);
-            speak("Core server unreachable.", false);
+            speak("I am unable to connect to core services right now.", false);
         }
     }
 };
 
 recognition.onerror = (e) => {
-    console.log("Speech Error: ", e.error);
     if (e.error === 'not-allowed') {
         statusText.innerText = "MIC PERMISSION DENIED";
     }
@@ -117,13 +138,18 @@ recognition.onend = () => {
     try { recognition.start(); } catch (e) {}
 };
 
+// Ensure voices are loaded
+if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = getNaturalVoice;
+}
+
 initBtn.addEventListener('click', () => {
     try {
         recognition.start();
         initBtn.style.display = 'none';
-        setCoreState('core-idle', 'AWAITING WAKE WORD');
+        setCoreState('core-idle', 'STANDBY');
         transcriptDisplay.innerText = `Say "${WAKE_WORD.toUpperCase()}" to activate`;
     } catch (err) {
-        alert("Microphone error. Open page directly in Chrome!");
+        alert("Please open this link directly in Google Chrome!");
     }
 });
