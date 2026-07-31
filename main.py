@@ -111,7 +111,7 @@ def chat_with_ultron(request: ChatRequest):
     try:
         # Use the latest stable model
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=user_msg,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
