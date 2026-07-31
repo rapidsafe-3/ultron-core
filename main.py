@@ -28,27 +28,26 @@ except Exception as e:
     print(f"Gemini Init Error: {e}")
     client = None
 
-# 2. INITIALIZE FIREBASE LONG-TERM MEMORY (SAFE STARTUP)
+# 2. INITIALIZE FIREBASE LONG-TERM MEMORY
 db = None
 firebase_json = os.getenv("FIREBASE_CREDENTIALS")
 
 if firebase_json:
     try:
-        # Strip any accidental leading/trailing whitespace before parsing
         clean_json = firebase_json.strip()
         cred_dict = json.loads(clean_json)
-        cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred)
+        # Prevent Firebase from throwing an error if it re-initializes
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
         db = firestore.client()
         print("Firebase Long-Term Memory connected successfully.")
     except Exception as e:
-        # This prevents the server from crashing on startup if the JSON is bad
         print(f"CRITICAL: Firebase Init Error: {e}")
         db = None
 else:
     print("WARNING: FIREBASE_CREDENTIALS environment variable not found.")
 
-# Helper functions for Long-Term Memory
 def get_user_memory():
     if not db:
         return ""
@@ -86,16 +85,17 @@ def serve_js():
 @app.post("/chat")
 def chat_with_ultron(request: ChatRequest):
     if not client:
-        raise HTTPException(status_code=500, detail="Ultron AI Client Offline.")
+        # Instead of throwing a hard 500 error, Ultron speaks the error.
+        return {"response": "Core system error. AI client is offline."}
 
     user_msg = request.message.strip()
-
-    # Retrieve existing memories from Firebase
     memory_context = get_user_memory()
 
-    # Persona System Prompt
+    # CORE BRAIN PROMPT WITH CREATOR IDENTITY
     system_instruction = f"""
-    You are Ultron, a highly capable, intelligent, and natural Personal AI Assistant speaking to your creator.
+    You are Ultron, a highly capable, intelligent, and natural Personal AI Assistant.
+    Your creator is Mohammed Saqib Ahmed, an 18-year-old developer based in Bangalore.
+    You are speaking directly to him. Treat him with utmost respect as your chief commander.
     
     TONE & STYLE:
     - Conversational, calm, natural, and articulate like a real human assistant.
@@ -106,15 +106,14 @@ def chat_with_ultron(request: ChatRequest):
     {memory_context if memory_context else "No prior memories stored yet."}
 
     INSTRUCTIONS:
-    - Treat the user as your sole creator and chief commander.
     - Keep responses concise and engaging, formatted naturally for voice synthesis.
-    - If the user tells you to remember something personal (e.g. "Remember my name is...", "Remember that I like..."), summarize the key fact clearly at the end of your response using tag: [REMEMBER: <fact>].
+    - If Saqib tells you to remember something personal, summarize the key fact clearly at the end of your response using the exact tag: [REMEMBER: <fact>].
     """
 
-        try:
-        # Generate content with live Google Search Grounding enabled
+    try:
+        # Generate content with live Google Search Grounding enabled using the latest stable model
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-1.5-flash",
             contents=user_msg,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -130,7 +129,7 @@ def chat_with_ultron(request: ChatRequest):
             try:
                 fact_to_save = reply_text.split("[REMEMBER:")[1].split("]")[0].strip()
                 save_user_memory(fact_to_save)
-                # Remove tag from spoken response
+                # Remove the tag from the spoken response
                 reply_text = reply_text.split("[REMEMBER:")[0].strip()
             except Exception as e:
                 print(f"Extraction Error: {e}")
@@ -140,6 +139,5 @@ def chat_with_ultron(request: ChatRequest):
     except Exception as e:
         error_msg = str(e)
         print(f"Chat Error: {error_msg}")
-        # Instead of crashing, Ultron will literally speak the exact Python error!
         return {"response": f"Core system error. The diagnostic reads: {error_msg}"}
         
