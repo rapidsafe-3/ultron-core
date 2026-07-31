@@ -10,9 +10,7 @@ const initBtn = document.getElementById('init-btn');
 let isAwake = false;
 let isProcessing = false;
 let isSpeaking = false;
-
 let speechSilenceTimer = null;
-let fullSpeechBuffer = "";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const synth = window.speechSynthesis;
@@ -43,10 +41,12 @@ function getNaturalVoice() {
 }
 
 function speak(text, shouldShutdown = false) {
+    // Cancel any previous speech
+    synth.cancel();
+    
     isSpeaking = true;
     setCoreState('core-speaking', 'ULTRON');
     
-    // Clean text of markdown formatting for natural voice output
     const cleanText = text.replace(/[*_#`]/g, '');
     const utterance = new SpeechSynthesisUtterance(cleanText);
     
@@ -54,11 +54,10 @@ function speak(text, shouldShutdown = false) {
     if (preferredVoice) utterance.voice = preferredVoice;
 
     utterance.pitch = 1.0; 
-    utterance.rate = 1.05; // Slightly conversational speed
+    utterance.rate = 1.05;
 
     utterance.onend = () => {
         isSpeaking = false;
-        fullSpeechBuffer = "";
         
         if (shouldShutdown) {
             isAwake = false;
@@ -75,7 +74,6 @@ function speak(text, shouldShutdown = false) {
     synth.speak(utterance);
 }
 
-// Function to send complete speech to backend
 async function sendToBackend(messageText) {
     if (isProcessing || !messageText.trim()) return;
 
@@ -96,66 +94,63 @@ async function sendToBackend(messageText) {
 
     } catch (error) {
         console.error(error);
-        speak("I ran into an issue connecting to core services. Let me try again.", false);
+        speak("Connection glitch. Say that again?", false);
     }
 }
 
 recognition.onresult = (event) => {
-    if (isSpeaking) return;
+    // INSTANT INTERRUPTION: If Ultron is talking and you speak, cut his audio immediately!
+    if (isSpeaking) {
+        synth.cancel();
+        isSpeaking = false;
+    }
 
+    let finalTranscript = "";
     let interimTranscript = "";
-    let finalTranscriptThisChunk = "";
 
     for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcriptChunk = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-            finalTranscriptThisChunk += event.results[i][0].transcript + " ";
+            finalTranscript += transcriptChunk;
         } else {
-            interimTranscript += event.results[i][0].transcript;
+            interimTranscript += transcriptChunk;
         }
     }
 
-    if (finalTranscriptThisChunk) {
-        fullSpeechBuffer += finalTranscriptThisChunk;
-    }
+    let currentText = (finalTranscript || interimTranscript).trim();
+    if (!currentText) return;
 
-    let liveDisplay = (fullSpeechBuffer + interimTranscript).trim().toLowerCase();
-    if (liveDisplay) {
-        transcriptDisplay.innerText = `"${liveDisplay}"`;
-    }
+    transcriptDisplay.innerText = `"${currentText}"`;
 
-    // 1. Activation Check
+    const lowerText = currentText.toLowerCase();
+
+    // 1. Activation
     if (!isAwake) {
-        if (liveDisplay.includes(WAKE_WORD)) {
+        if (lowerText.includes(WAKE_WORD)) {
             isAwake = true;
-            fullSpeechBuffer = "";
-            speak("Hey there! I'm awake. What's on your mind?");
+            speak("Online. What do you need?");
         }
         return;
     }
 
-    // 2. Shutdown Check
-    const isShutdownReq = SHUTDOWN_COMMANDS.some(cmd => liveDisplay.includes(cmd));
+    // 2. Shutdown
+    const isShutdownReq = SHUTDOWN_COMMANDS.some(cmd => lowerText.includes(cmd));
     if (isAwake && isShutdownReq && !isProcessing) {
         isProcessing = true;
-        fullSpeechBuffer = "";
         clearTimeout(speechSilenceTimer);
-        speak("Going into standby mode. Catch you later!", true);
+        speak("Going into standby.", true);
         return;
     }
 
-    // 3. Smart Silence Buffer: Waits 1.8 seconds of complete silence before sending!
-    if (isAwake && !isProcessing) {
+    // 3. Silence Buffer for full sentence capture without duplication
+    if (isAwake && !isProcessing && finalTranscript.length > 0) {
         clearTimeout(speechSilenceTimer);
         speechSilenceTimer = setTimeout(() => {
-            let completeMessage = (fullSpeechBuffer + interimTranscript).trim();
-            // Remove wake word from message body if spoken
-            completeMessage = completeMessage.replace(new RegExp(WAKE_WORD, "gi"), "").trim();
-
-            if (completeMessage.length > 0) {
-                fullSpeechBuffer = "";
-                sendToBackend(completeMessage);
+            let cleanMsg = finalTranscript.replace(new RegExp(WAKE_WORD, "gi"), "").trim();
+            if (cleanMsg.length > 0) {
+                sendToBackend(cleanMsg);
             }
-        }, 1800); // 1.8 second delay ensures full sentence capture
+        }, 1200); // 1.2 second pause triggers send
     }
 };
 
@@ -183,3 +178,4 @@ initBtn.addEventListener('click', () => {
         alert("Please open this link directly in Google Chrome!");
     }
 });
+    
