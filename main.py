@@ -111,10 +111,10 @@ def chat_with_ultron(request: ChatRequest):
     - If the user tells you to remember something personal (e.g. "Remember my name is...", "Remember that I like..."), summarize the key fact clearly at the end of your response using tag: [REMEMBER: <fact>].
     """
 
-    try:
+        try:
         # Generate content with live Google Search Grounding enabled
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=user_msg,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -137,9 +137,9 @@ def chat_with_ultron(request: ChatRequest):
 
         return {"response": reply_text}
 
-        except Exception as e:
+    except Exception as e:
         error_msg = str(e)
         print(f"Chat Error: {error_msg}")
         # Instead of crashing, Ultron will literally speak the exact Python error!
         return {"response": f"Core system error. The diagnostic reads: {error_msg}"}
-    
+        
