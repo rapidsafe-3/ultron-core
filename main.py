@@ -130,6 +130,9 @@ def chat_with_ultron(request: ChatRequest):
 
         return {"response": reply_text}
 
-    except Exception as e:
-        print(f"Chat Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+        error_msg = str(e)
+        print(f"Chat Error: {error_msg}")
+        # Instead of crashing, Ultron will literally speak the exact Python error!
+        return {"response": f"Core system error. The diagnostic reads: {error_msg}"}
+    
