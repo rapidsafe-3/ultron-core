@@ -1,5 +1,6 @@
 fastapi
 uvicorn
-google-genai>=1.0.0
+groq
+duckduckgo-search
 pydantic
 firebase-admin
