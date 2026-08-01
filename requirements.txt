@@ -7,3 +7,4 @@ pydantic
 firebase-admin
 edge-tts
 python-multipart
+aiofiles
