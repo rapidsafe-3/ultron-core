@@ -78,7 +78,15 @@ function connectWebSocket() {
 
 async function initAudioEngine() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const constraints = {
+    audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1
+    }
+};
+const stream = await navigator.mediaDevices.getUserMedia(constraints);
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(stream);
         analyser = audioContext.createAnalyser();
