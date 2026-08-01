@@ -57,11 +57,17 @@ def save_user_memory(fact: str):
 
 def perform_web_search(query: str) -> str:
     try:
-        results = DDGS().text(query, max_results=3)
-        if results:
-            return "\n\nCRITICAL LIVE WEB DATA (USE THIS TO ANSWER):\n" + "\n".join([f"- {r['title']}: {r['body']}" for r in results])
-        return ""
-    except:
+        results_text = ""
+        with DDGS() as ddgs:
+            # Iterating through the text search generator properly
+            results = [r for r in ddgs.text(query, max_results=3)]
+            if results:
+                results_text = "\n\nCRITICAL LIVE WEB DATA (USE THIS TO ANSWER):\n"
+                for r in results:
+                    results_text += f"- {r.get('title', '')}: {r.get('body', '')}\n"
+        return results_text
+    except Exception as e:
+        print(f"Search Error: {e}")
         return ""
 
 @app.get("/")
@@ -81,7 +87,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            audio_bytes = await websocket.receive_bytes()
+            # Wrapped receive_bytes to safely catch disconnects
+            try:
+                audio_bytes = await websocket.receive_bytes()
+            except WebSocketDisconnect:
+                print("Client disconnected.")
+                break
+                
             if not audio_bytes or len(audio_bytes) < 1000:
                 continue
 
@@ -93,12 +105,14 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 with open(temp_audio_path, "rb") as audio_file:
                     transcription = groq_client.audio.transcriptions.create(
-                        file=(temp_audio_path, audio_file.read()),
+                        file=(os.path.basename(temp_audio_path), audio_file.read()),
                         model="whisper-large-v3",
-                        language="en" 
+                        language="en",
+                        response_format="json" 
                     )
                 user_text = transcription.text.strip()
-            except:
+            except Exception as e:
+                print(f"Transcription error: {e}")
                 user_text = ""
             finally:
                 if os.path.exists(temp_audio_path):
@@ -120,12 +134,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Generate Wake Audio
                     voice = "en-IN-NeerjaNeural"
                     communicate = edge_tts.Communicate("I'm listening, Saaqib.", voice)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_mp3:
-                        await communicate.save(temp_mp3.name)
-                        temp_mp3_path = temp_mp3.name
-                    with open(temp_mp3_path, "rb") as mp3_file:
-                        await websocket.send_bytes(mp3_file.read())
-                    os.remove(temp_mp3_path)
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            await websocket.send_bytes(chunk["data"])
                 continue # Do not process chat if she was asleep
             
             if any(cmd in lowered for cmd in ["shut down", "sleep", "go to sleep"]):
@@ -135,12 +146,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Generate Sleep Audio
                 voice = "en-IN-NeerjaNeural" 
                 communicate = edge_tts.Communicate("Going to sleep. Call me if you need anything.", voice)
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_mp3:
-                    await communicate.save(temp_mp3.name)
-                    temp_mp3_path = temp_mp3.name
-                with open(temp_mp3_path, "rb") as mp3_file:
-                    await websocket.send_bytes(mp3_file.read())
-                os.remove(temp_mp3_path)
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        await websocket.send_bytes(chunk["data"])
                 continue
 
             # --- ACTIVE CONVERSATION LOGIC ---
@@ -187,15 +195,16 @@ async def websocket_endpoint(websocket: WebSocket):
             spoken_text = reply_text.replace("Saqib", "Saaqib") 
             voice = "en-IN-NeerjaNeural"
             
+            # Using async streaming instead of saving to a file
             communicate = edge_tts.Communicate(spoken_text, voice)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_mp3:
-                await communicate.save(temp_mp3.name)
-                temp_mp3_path = temp_mp3.name
-
-            with open(temp_mp3_path, "rb") as mp3_file:
-                await websocket.send_bytes(mp3_file.read())
-            os.remove(temp_mp3_path)
+            
+            try:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                         await websocket.send_bytes(chunk["data"])
+            except Exception as e:
+                 print(f"TTS Error: {e}")
 
     except WebSocketDisconnect:
         print("Client disconnected.")
-                        
+                    
