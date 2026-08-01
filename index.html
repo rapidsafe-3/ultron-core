@@ -3,26 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ultron JARVIS Core</title>
+    <title>Ultron Proton Core</title>
     <link rel="stylesheet" href="style.css">
-    <style>
-        #terminal-panel { display: none; } /* Hidden until power on */
-    </style>
 </head>
 <body>
 
-    <div id="core-container" class="jarvis-container state-idle">
-        <div class="ring-1"></div>
-        <div class="ring-2"></div>
+    <!-- Invisible button covers screen to bypass mobile audio lock -->
+    <div id="activation-overlay"></div>
+
+    <div id="core-container" class="proton-container state-sleep">
+        <div class="ring-outer"></div>
+        <div class="ring-inner"></div>
         <div class="core-center"></div>
-    </div>
-
-    <!-- Init button to unlock mobile audio context -->
-    <button id="init-btn" class="mic-btn">POWER ON ULTRON</button>
-
-    <div id="terminal-panel" class="terminal">
-        <div id="status-text">SYSTEM OFFLINE</div>
-        <div id="transcript-text">Awaiting initialization...</div>
     </div>
 
     <script src="app.js"></script>
