@@ -12,7 +12,7 @@ import edge_tts
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-app = FastAPI(title="Ultron Core Engine", version="13.0")
+app = FastAPI(title="Ultron Core Engine", version="13.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,9 +35,9 @@ if firebase_json:
             cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
         db = firestore.client()
-        print("Firebase Memory Online.")
+        print("-> Firebase Memory Online.")
     except Exception as e:
-        print(f"Firebase Init Error: {e}")
+        print(f"-> Firebase Init Error: {e}")
         db = None
 
 def get_user_memory():
@@ -71,7 +71,7 @@ def serve_css(): return FileResponse("style.css", media_type="text/css")
 def serve_js(): return FileResponse("app.js", media_type="application/javascript")
 
 async def send_tts(websocket: WebSocket, text: str):
-    """Generates a complete MP3 file and sends it safely to the browser."""
+    print(f"-> Generating Voice Audio for: '{text}'")
     voice = "en-IN-PrabhatNeural"
     communicate = edge_tts.Communicate(text, voice)
     
@@ -79,6 +79,7 @@ async def send_tts(websocket: WebSocket, text: str):
         temp_mp3_path = temp_mp3.name
         
     await communicate.save(temp_mp3_path)
+    print("-> Voice generated, sending to phone...")
     
     with open(temp_mp3_path, "rb") as mp3_file:
         await websocket.send_bytes(mp3_file.read())
@@ -90,21 +91,26 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     chat_history = []
     is_awake = False
+    print("-> NEW PHONE CONNECTION ACCEPTED")
 
     try:
         while True:
             try:
                 audio_bytes = await websocket.receive_bytes()
+                print(f"-> Received audio chunk from phone: {len(audio_bytes)} bytes")
             except WebSocketDisconnect:
+                print("-> Phone disconnected.")
                 break
                 
             if not audio_bytes or len(audio_bytes) < 1000:
+                print("-> Audio chunk too small, ignoring.")
                 continue
 
             with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
                 temp_audio.write(audio_bytes)
                 temp_audio_path = temp_audio.name
 
+            print("-> Sending audio to Groq Whisper for transcription...")
             try:
                 with open(temp_audio_path, "rb") as audio_file:
                     transcription = groq_client.audio.transcriptions.create(
@@ -114,7 +120,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         response_format="json" 
                     )
                 user_text = transcription.text.strip() if hasattr(transcription, 'text') else transcription.get('text', '').strip()
-            except Exception:
+                print(f"-> Transcription Success! User said: '{user_text}'")
+            except Exception as e:
+                print(f"-> CRITICAL GROQ ERROR: {e}")
                 user_text = ""
             finally:
                 if os.path.exists(temp_audio_path):
@@ -123,6 +131,7 @@ async def websocket_endpoint(websocket: WebSocket):
             lowered = user_text.lower().strip()
             ghost_phrases = ["thank you", "thanks for watching", "subtitles by", "amara.org", "you", "bye"]
             if not user_text or len(user_text) < 2 or lowered in ghost_phrases:
+                print("-> Detected ghost/background noise, ignoring.")
                 continue
                 
             await websocket.send_json({"type": "transcript", "text": user_text})
@@ -131,12 +140,14 @@ async def websocket_endpoint(websocket: WebSocket):
             if not is_awake:
                 if "ultron" in lowered:
                     is_awake = True
+                    print("-> WAKING UP ULTRON")
                     await websocket.send_json({"type": "status", "state": "awake"})
                     await send_tts(websocket, "I am listening.")
                 continue
             
             if any(cmd in lowered for cmd in ["shut down", "sleep", "go to sleep"]):
                 is_awake = False
+                print("-> PUTTING ULTRON TO SLEEP")
                 await websocket.send_json({"type": "status", "state": "sleep"})
                 await send_tts(websocket, "Going offline. Call me if you need me.")
                 continue
@@ -147,6 +158,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 search_query = user_text
                 if "weather" in lowered and "bangalore" not in lowered:
                     search_query += " in Bangalore"
+                print(f"-> Performing Web Search for: {search_query}")
                 live_search = perform_web_search(search_query)
 
             memory_context = get_user_memory()
@@ -154,7 +166,7 @@ async def websocket_endpoint(websocket: WebSocket):
             system_prompt = f"""
             You are Ultron, a highly advanced AI Assistant. Your creator is Saqib.
             STRICT RULES:
-            1. NEVER use the words "Sir", "Boss", or "Sirboss". Address him ONLY as Saqib.
+            1. Always use the words "Boss".
             2. Speak in the exact language he speaks to you (English, Hindi, or Urdu).
             3. Use the web data provided below to answer real-time questions.
             4. Keep responses direct, friendly, and concise. No formatting.
@@ -165,6 +177,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             messages = [{"role": "system", "content": system_prompt}] + chat_history[-6:] + [{"role": "user", "content": user_text}]
 
+            print("-> Sending conversation to Llama 3 API...")
             chat_completion = groq_client.chat.completions.create(
                 messages=messages,
                 model="llama-3.3-70b-versatile",
@@ -173,6 +186,7 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             reply_text = chat_completion.choices[0].message.content.strip()
+            print(f"-> Llama 3 Reply: '{reply_text}'")
             chat_history.extend([{"role": "user", "content": user_text}, {"role": "assistant", "content": reply_text}])
 
             await websocket.send_json({"type": "response_text", "text": reply_text})
@@ -182,5 +196,5 @@ async def websocket_endpoint(websocket: WebSocket):
             await send_tts(websocket, spoken_text)
 
     except WebSocketDisconnect:
-        print("Client disconnected.")
-        
+        print("-> Phone disconnected.")
+                    
