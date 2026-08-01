@@ -2,20 +2,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultron HUD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ultron JARVIS Core</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <div id="ultron-core" class="core-idle">
-            <div class="inner-core"></div>
-        </div>
-        <div class="status-panel">
-            <h1 id="status-text">SYSTEM OFFLINE</h1>
-            <p id="transcript-display">Awaiting activation...</p>
-        </div>
-        <button id="init-btn">INITIALIZE CORE</button>
+
+    <div id="core-container" class="jarvis-container state-idle">
+        <div class="ring-1"></div>
+        <div class="ring-2"></div>
+        <div class="core-center"></div>
+    </div>
+
+    <div class="terminal">
+        <div id="status-text">INITIALIZING...</div>
+        <div id="transcript-text">Establishing neural link...</div>
+        <!-- Push to talk button prevents browser from cutting you off -->
+        <button id="mic-btn" class="mic-btn">HOLD TO SPEAK</button>
     </div>
 
     <script src="app.js"></script>
