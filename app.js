@@ -13,16 +13,14 @@ let isProcessing = false;
 let isAwake = false; 
 let silenceStart = null;
 
-// TUNED FOR WHISPERS 
 const SILENCE_THRESHOLD = -55; 
 const SILENCE_DURATION = 1200; 
 
+// Force secure websocket connection
 const WS_URL = `wss://${window.location.host}/ws`;
 
 function connectWebSocket() {
     ws = new WebSocket(WS_URL);
-    
-    // Tell the WebSocket we expect ArrayBuffer (binary) data
     ws.binaryType = "arraybuffer"; 
     
     ws.onmessage = async (event) => {
@@ -36,7 +34,6 @@ function connectWebSocket() {
         else if (event.data instanceof ArrayBuffer) {
             coreContainer.className = "proton-container state-speaking";
             
-            // The complete audio file is here, ready to play!
             const audioBlob = new Blob([event.data], { type: 'audio/mp3' });
             const audioUrl = URL.createObjectURL(audioBlob);
             
@@ -47,15 +44,19 @@ function connectWebSocket() {
                 coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
                 isProcessing = false;
             };
-            currentAudio.play();
+            currentAudio.play().catch(e => alert("Audio Playback Blocked by Browser!"));
         }
     };
+    
+    ws.onerror = (error) => {
+        console.error("WebSocket Error:", error);
+    };
+    
     ws.onclose = () => setTimeout(connectWebSocket, 3000);
 }
 
 async function initAudioEngine() {
     try {
-        // Force the browser to use standard media routing instead of communication routing
         const constraints = {
             audio: {
                 echoCancellation: false,
@@ -91,6 +92,7 @@ async function initAudioEngine() {
         monitorVolume();
 
     } catch (err) {
+        alert("Microphone Access Denied or Failed! Check Phone Settings.");
         console.error("Mic Error:", err);
     }
 }
@@ -115,7 +117,6 @@ function monitorVolume() {
         if (dB > SILENCE_THRESHOLD) {
             silenceStart = null;
             
-            // INSTANT INTERRUPT
             if (currentAudio && !currentAudio.paused) {
                 currentAudio.pause();
                 isProcessing = false;
@@ -143,10 +144,9 @@ function monitorVolume() {
     checkAudioLevel();
 }
 
-// Single tap to start the engine, then the overlay disappears forever
 overlay.addEventListener('click', () => {
     overlay.style.display = 'none';
-    coreContainer.className = "proton-container state-sleep"; // Starts asleep
+    coreContainer.className = "proton-container state-sleep";
     initAudioEngine();
 });
 
