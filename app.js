@@ -1,14 +1,19 @@
 const coreContainer = document.getElementById('core-container');
 const statusText = document.getElementById('status-text');
 const transcriptText = document.getElementById('transcript-text');
-const micBtn = document.getElementById('mic-btn');
 
 let ws;
-let mediaRecorder;
-let audioChunks = [];
 let currentAudio = null;
+let isAwake = false;
+let isProcessing = false;
+let fullCommand = "";
 
-// Use wss:// for Render (secure websocket)
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = new SpeechRecognition();
+recognition.continuous = true;
+recognition.interimResults = true;
+recognition.lang = 'en-US';
+
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const WS_URL = `${wsProtocol}//${window.location.host}/ws`;
 
@@ -18,32 +23,35 @@ function connectWebSocket() {
     ws.onopen = () => {
         statusText.innerText = "SYSTEM ONLINE";
         coreContainer.className = "jarvis-container state-idle";
+        // Start continuous background listening once connected
+        recognition.start();
     };
 
     ws.onmessage = async (event) => {
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
-            if (data.type === "transcript") {
-                transcriptText.innerText = `You: ${data.text}`;
-            } else if (data.type === "response_text") {
+            if (data.type === "response_text") {
                 transcriptText.innerText = `Ultron: ${data.text}`;
             }
         } else {
-            // Received MP3 Bytes! Play instantly.
+            // Play audio response
             coreContainer.className = "jarvis-container state-speaking";
             statusText.innerText = "RESPONDING";
             
             const audioBlob = new Blob([event.data], { type: 'audio/mp3' });
             const audioUrl = URL.createObjectURL(audioBlob);
             
-            if (currentAudio) { currentAudio.pause(); }
+            if (currentAudio) currentAudio.pause();
             
             currentAudio = new Audio(audioUrl);
             currentAudio.onended = () => {
                 coreContainer.className = "jarvis-container state-idle";
                 statusText.innerText = "AWAITING INPUT";
+                isProcessing = false;
+                isAwake = false; // Reset to require wake word again
+                fullCommand = "";
             };
-            currentAudio.play();
+            await currentAudio.play();
         }
     };
 
@@ -53,46 +61,67 @@ function connectWebSocket() {
     };
 }
 
-// Push-to-Talk Logic (Highest Reliability for Mobile)
-micBtn.addEventListener('touchstart', startRecording, {passive: true});
-micBtn.addEventListener('touchend', stopRecording);
-micBtn.addEventListener('mousedown', startRecording);
-micBtn.addEventListener('mouseup', stopRecording);
+let silenceTimer = null;
 
-async function startRecording(e) {
-    if(e) e.preventDefault();
-    if (currentAudio) currentAudio.pause(); // Interrupt speaking immediately
+recognition.onresult = (event) => {
+    if (isProcessing) return; // Ignore input while he is thinking/speaking
+
+    let interimTranscript = "";
+    let finalTranscriptThisChunk = "";
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+            finalTranscriptThisChunk += event.results[i][0].transcript + " ";
+        } else {
+            interimTranscript += event.results[i][0].transcript;
+        }
+    }
+
+    let liveDisplay = (fullCommand + finalTranscriptThisChunk + interimTranscript).trim().toLowerCase();
     
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        audioChunks = [];
+    if (liveDisplay) {
+         transcriptText.innerText = `You: ${liveDisplay}`;
+    }
 
-        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(audioBlob); // Send audio instantly over socket!
-                coreContainer.className = "jarvis-container state-processing";
-                statusText.innerText = "PROCESSING";
-            }
-            stream.getTracks().forEach(track => track.stop());
-        };
-
-        mediaRecorder.start();
+    // Wake Word Detection
+    if (!isAwake && liveDisplay.includes("ultron")) {
+        isAwake = true;
         coreContainer.className = "jarvis-container state-listening";
         statusText.innerText = "LISTENING...";
-    } catch (err) {
-        alert("Microphone permission denied.");
+        // Strip the wake word so it's not part of the command
+        fullCommand = liveDisplay.substring(liveDisplay.indexOf("ultron") + 6).trim();
+    } else if (isAwake) {
+        fullCommand += finalTranscriptThisChunk;
+        
+        // If he is awake and you stop speaking for 1.5 seconds, send the command!
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+            let finalCommand = (fullCommand + interimTranscript).trim();
+            if (finalCommand.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+                isProcessing = true;
+                coreContainer.className = "jarvis-container state-processing";
+                statusText.innerText = "PROCESSING";
+                
+                // Send TEXT via websocket instead of audio for faster processing
+                ws.send(JSON.stringify({ type: "text_query", text: finalCommand }));
+            }
+        }, 1500); 
     }
-}
+};
 
-function stopRecording(e) {
-    if(e) e.preventDefault();
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
+recognition.onend = () => {
+    // Keep it running forever
+    if (!isProcessing) {
+        recognition.start();
     }
-}
+};
 
-// Initialize
+recognition.onerror = (e) => {
+    console.log("Speech recognition error:", e.error);
+    if (e.error === 'not-allowed') {
+        alert("Please allow microphone access in Chrome settings.");
+    }
+};
+
+// Start connection
 connectWebSocket();
