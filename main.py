@@ -59,7 +59,6 @@ def perform_web_search(query: str) -> str:
     try:
         results_text = ""
         with DDGS() as ddgs:
-            # Iterating through the text search generator properly
             results = [r for r in ddgs.text(query, max_results=3)]
             if results:
                 results_text = "\n\nCRITICAL LIVE WEB DATA (USE THIS TO ANSWER):\n"
@@ -110,7 +109,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         language="en",
                         response_format="json" 
                     )
-                # Ensure we extract the text correctly whether it returns an object or a dict
+                # Extract text correctly based on Groq's return object
                 user_text = transcription.text.strip() if hasattr(transcription, 'text') else transcription.get('text', '').strip()
             except Exception as e:
                 print(f"Transcription error: {e}")
@@ -133,22 +132,26 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "status", "state": "awake"})
                     
                     # Generate Wake Audio stream
-                    voice = "en-IN-NeerjaNeural"
+                    voice = "en-IN-PrabhatNeural"
                     communicate = edge_tts.Communicate("I'm listening, Saaqib.", voice)
+                    audio_data = b""
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
-                            await websocket.send_bytes(chunk["data"]) # send_bytes is crucial here
+                            audio_data += chunk["data"]
+                    await websocket.send_bytes(audio_data) 
                 continue
             
             if any(cmd in lowered for cmd in ["shut down", "sleep", "go to sleep"]):
                 is_awake = False
                 await websocket.send_json({"type": "status", "state": "sleep"})
                 
-                voice = "en-IN-NeerjaNeural" 
+                voice = "en-IN-PrabhatNeural" 
                 communicate = edge_tts.Communicate("Going to sleep. Call me if you need anything.", voice)
+                audio_data = b""
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
-                        await websocket.send_bytes(chunk["data"])
+                        audio_data += chunk["data"]
+                await websocket.send_bytes(audio_data)
                 continue
 
             # --- ACTIVE CONVERSATION LOGIC ---
@@ -162,7 +165,7 @@ async def websocket_endpoint(websocket: WebSocket):
             memory_context = get_user_memory()
 
             system_prompt = f"""
-            You are Ultron, a highly advanced female AI Assistant. 
+            You are Ultron, a highly advanced AI Assistant. 
             Your creator is Saqib.
             
             STRICT RULES:
@@ -193,18 +196,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # Stream speech back to the frontend immediately
             spoken_text = reply_text.replace("Saqib", "Saaqib") 
-            voice = "en-IN-NeerjaNeural"
+            voice = "en-IN-PrabhatNeural"
             
             communicate = edge_tts.Communicate(spoken_text, voice)
+            audio_data = b""
             
             try:
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
-                        # CRITICAL: Send raw binary data over WebSocket
-                        await websocket.send_bytes(chunk["data"])
+                        audio_data += chunk["data"]
+                
+                # Send the completely assembled MP3 bytes
+                await websocket.send_bytes(audio_data)
             except Exception as e:
                  print(f"TTS Error: {e}")
 
     except WebSocketDisconnect:
         print("Client disconnected.")
-                
+        
