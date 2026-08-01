@@ -20,6 +20,30 @@ const SILENCE_DURATION = 1200;
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const WS_URL = `${wsProtocol}//${window.location.host}/ws`;
 
+// Audio Queue for streaming TTS chunks
+let audioQueue = [];
+let isPlaying = false;
+
+function playNextAudio() {
+    if (audioQueue.length === 0) {
+        isPlaying = false;
+        coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
+        isProcessing = false;
+        return;
+    }
+    
+    isPlaying = true;
+    const audioUrl = audioQueue.shift();
+    currentAudio = new Audio(audioUrl);
+    
+    currentAudio.onended = () => {
+        URL.revokeObjectURL(audioUrl); // Free up memory
+        playNextAudio();
+    };
+    currentAudio.play();
+}
+
+
 function connectWebSocket() {
     ws = new WebSocket(WS_URL);
     ws.onmessage = async (event) => {
@@ -30,18 +54,15 @@ function connectWebSocket() {
                 coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
             }
         } else {
-            // Audio Playback
+            // Audio Playback streaming handling
             coreContainer.className = "proton-container state-speaking";
             const audioBlob = new Blob([event.data], { type: 'audio/mp3' });
             const audioUrl = URL.createObjectURL(audioBlob);
-
-            if (currentAudio) currentAudio.pause();
-            currentAudio = new Audio(audioUrl);
-            currentAudio.onended = () => {
-                coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
-                isProcessing = false;
-            };
-            await currentAudio.play();
+            
+            audioQueue.push(audioUrl);
+            if (!isPlaying) {
+                 playNextAudio();
+            }
         }
     };
     ws.onclose = () => setTimeout(connectWebSocket, 3000);
@@ -102,6 +123,8 @@ function monitorVolume() {
             // INSTANT INTERRUPT
             if (currentAudio && !currentAudio.paused) {
                 currentAudio.pause();
+                audioQueue = []; // Clear the queue on interrupt
+                isPlaying = false;
                 isProcessing = false;
                 coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
             }
@@ -135,4 +158,3 @@ overlay.addEventListener('click', () => {
 });
 
 connectWebSocket();
-            
