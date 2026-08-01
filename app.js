@@ -13,7 +13,7 @@ let isProcessing = false;
 let isAwake = false; 
 let silenceStart = null;
 
-// TUNED FOR WHISPERS & QUICK CUTOFF
+// TUNED FOR WHISPERS 
 const SILENCE_THRESHOLD = -55; 
 const SILENCE_DURATION = 1200; 
 
@@ -25,10 +25,9 @@ function connectWebSocket() {
     ws.onmessage = async (event) => {
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
-            if (data.type === "sleep_command") {
-                isAwake = false;
-                coreContainer.className = "proton-container state-sleep";
-                return;
+            if (data.type === "status") {
+                isAwake = (data.state === "awake");
+                coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
             }
         } else {
             // Audio Playback
@@ -73,27 +72,6 @@ async function initAudioEngine() {
             audioChunks = [];
         };
 
-        // Continuous local Wake Word detection backup
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if(SpeechRecognition) {
-            const recognition = new SpeechRecognition();
-            recognition.continuous = true;
-            recognition.interimResults = true;
-            recognition.onresult = (e) => {
-                let text = "";
-                for (let i = e.resultIndex; i < e.results.length; i++) {
-                    text += e.results[i][0].transcript.toLowerCase();
-                }
-                if (!isAwake && text.includes("ultron")) {
-                    isAwake = true;
-                    isProcessing = false;
-                    coreContainer.className = "proton-container state-listening";
-                }
-            };
-            recognition.start();
-            recognition.onend = () => recognition.start();
-        }
-
         monitorVolume();
 
     } catch (err) {
@@ -118,15 +96,14 @@ function monitorVolume() {
         let average = sum / dataArray.length;
         let dB = 20 * Math.log10(average / 255);
 
-        // INSTANT INTERRUPT & VAD
         if (dB > SILENCE_THRESHOLD) {
             silenceStart = null;
             
-            // If he is talking, and you speak, shut him up instantly!
+            // INSTANT INTERRUPT
             if (currentAudio && !currentAudio.paused) {
                 currentAudio.pause();
                 isProcessing = false;
-                coreContainer.className = "proton-container state-idle";
+                coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
             }
 
             if (!isRecording) {
@@ -153,10 +130,9 @@ function monitorVolume() {
 // Single tap to start the engine, then the overlay disappears forever
 overlay.addEventListener('click', () => {
     overlay.style.display = 'none';
-    isAwake = true;
-    coreContainer.className = "proton-container state-idle";
+    coreContainer.className = "proton-container state-sleep"; // Starts asleep
     initAudioEngine();
 });
 
 connectWebSocket();
-                
+            
