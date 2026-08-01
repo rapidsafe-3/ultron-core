@@ -1,6 +1,8 @@
 const coreContainer = document.getElementById('core-container');
 const statusText = document.getElementById('status-text');
 const transcriptText = document.getElementById('transcript-text');
+const initBtn = document.getElementById('init-btn');
+const terminal = document.getElementById('terminal-panel');
 
 let ws;
 let currentAudio = null;
@@ -11,10 +13,12 @@ let analyser = null;
 
 let isRecording = false;
 let isProcessing = false;
+let isAwake = false; // System starts asleep
 let silenceStart = null;
 
-const SILENCE_THRESHOLD = -45; // dB volume threshold for voice detection
-const SILENCE_DURATION = 1200; // 1.2s silence triggers auto-send
+// Audio Tuning Parameters
+const SILENCE_THRESHOLD = -45; // dB volume threshold for speaking
+const SILENCE_DURATION = 1500; // 1.5s of silence triggers sending
 
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const WS_URL = `${wsProtocol}//${window.location.host}/ws`;
@@ -25,19 +29,40 @@ function connectWebSocket() {
     ws.onopen = () => {
         statusText.innerText = "SYSTEM ONLINE";
         coreContainer.className = "jarvis-container state-idle";
-        initAudioEngine();
     };
 
     ws.onmessage = async (event) => {
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
+            
+            if (data.type === "shutdown_command") {
+                isAwake = false;
+                return;
+            }
+            
             if (data.type === "transcript") {
+                
+                let heard = data.text.toLowerCase();
+                
+                // WAKE WORD LOGIC
+                if (!isAwake) {
+                    if (heard.includes("ultron")) {
+                        isAwake = true;
+                        statusText.innerText = "ONLINE & LISTENING";
+                        transcriptText.innerText = "Awaiting command...";
+                        coreContainer.className = "jarvis-container state-listening";
+                    }
+                    isProcessing = false;
+                    return; // Don't process the wake word as a chat command
+                }
+                
                 transcriptText.innerText = `You: "${data.text}"`;
+
             } else if (data.type === "response_text") {
                 transcriptText.innerText = `Ultron: "${data.text}"`;
             }
         } else {
-            // Neural Voice Playback
+            // Audio Playback
             coreContainer.className = "jarvis-container state-speaking";
             statusText.innerText = "RESPONDING";
 
@@ -48,8 +73,13 @@ function connectWebSocket() {
 
             currentAudio = new Audio(audioUrl);
             currentAudio.onended = () => {
-                coreContainer.className = "jarvis-container state-idle";
-                statusText.innerText = "LISTENING...";
+                if(isAwake) {
+                    coreContainer.className = "jarvis-container state-listening";
+                    statusText.innerText = "LISTENING...";
+                } else {
+                    coreContainer.className = "jarvis-container state-idle";
+                    statusText.innerText = "STANDBY (Say 'Ultron')";
+                }
                 isProcessing = false;
             };
             await currentAudio.play();
@@ -78,11 +108,13 @@ async function initAudioEngine() {
         mediaRecorder.onstop = () => {
             if (audioChunks.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                ws.send(audioBlob); // Stream raw audio to Whisper V3
+                ws.send(audioBlob); 
                 
                 isProcessing = true;
-                coreContainer.className = "jarvis-container state-processing";
-                statusText.innerText = "THINKING...";
+                if(isAwake) {
+                    coreContainer.className = "jarvis-container state-processing";
+                    statusText.innerText = "PROCESSING...";
+                }
             }
             audioChunks = [];
         };
@@ -90,12 +122,12 @@ async function initAudioEngine() {
         monitorVolume();
 
     } catch (err) {
-        console.error("Mic Access Error:", err);
-        statusText.innerText = "MIC PERMISSION REQUIRED";
+        console.error("Mic Error:", err);
+        alert("Allow Microphone to use Ultron.");
     }
 }
 
-// Continuous Decibel Level Voice Activity Detection (VAD)
+// Custom VAD (Voice Activity Detection)
 function monitorVolume() {
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     
@@ -113,24 +145,27 @@ function monitorVolume() {
         let average = sum / dataArray.length;
         let dB = 20 * Math.log10(average / 255);
 
-        // Speech Detected
+        // Someone is talking
         if (dB > SILENCE_THRESHOLD) {
             silenceStart = null;
             if (!isRecording) {
                 isRecording = true;
                 audioChunks = [];
                 mediaRecorder.start();
-                coreContainer.className = "jarvis-container state-listening";
-                statusText.innerText = "LISTENING...";
+                if(isAwake) {
+                    coreContainer.className = "jarvis-container state-listening";
+                    statusText.innerText = "HEARING...";
+                }
             }
         } else if (isRecording) {
-            // Silence Detected
+            // Silence started
             if (!silenceStart) {
                 silenceStart = Date.now();
             } else if (Date.now() - silenceStart > SILENCE_DURATION) {
+                // Stopped talking for 1.5 seconds -> Send it!
                 isRecording = false;
                 silenceStart = null;
-                mediaRecorder.stop(); // Stops and sends recording to server
+                mediaRecorder.stop(); 
             }
         }
 
@@ -140,4 +175,14 @@ function monitorVolume() {
     checkAudioLevel();
 }
 
+// Ensure audio context unlocks on mobile
+initBtn.addEventListener('click', () => {
+    initBtn.style.display = 'none';
+    terminal.style.display = 'block';
+    statusText.innerText = "STANDBY (Say 'Ultron')";
+    transcriptText.innerText = "System activated.";
+    initAudioEngine();
+});
+
 connectWebSocket();
+                        
