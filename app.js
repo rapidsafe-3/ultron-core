@@ -20,30 +20,6 @@ const SILENCE_DURATION = 1200;
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const WS_URL = `${wsProtocol}//${window.location.host}/ws`;
 
-// Audio Queue for streaming TTS chunks
-let audioQueue = [];
-let isPlaying = false;
-
-function playNextAudio() {
-    if (audioQueue.length === 0) {
-        isPlaying = false;
-        coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
-        isProcessing = false;
-        return;
-    }
-    
-    isPlaying = true;
-    const audioUrl = audioQueue.shift();
-    currentAudio = new Audio(audioUrl);
-    
-    currentAudio.onended = () => {
-        URL.revokeObjectURL(audioUrl); // Free up memory
-        playNextAudio();
-    };
-    currentAudio.play();
-}
-
-
 function connectWebSocket() {
     ws = new WebSocket(WS_URL);
     
@@ -51,7 +27,6 @@ function connectWebSocket() {
     ws.binaryType = "arraybuffer"; 
     
     ws.onmessage = async (event) => {
-        // If the data is a string, it's JSON (status or transcript)
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
             if (data.type === "status") {
@@ -59,18 +34,21 @@ function connectWebSocket() {
                 coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
             }
         } 
-        // If the data is an ArrayBuffer, it is the raw audio stream from edge-tts
         else if (event.data instanceof ArrayBuffer) {
             coreContainer.className = "proton-container state-speaking";
             
-            // Convert the binary ArrayBuffer to a playable Blob
+            // The complete audio file is here, ready to play!
             const audioBlob = new Blob([event.data], { type: 'audio/mp3' });
             const audioUrl = URL.createObjectURL(audioBlob);
             
-            audioQueue.push(audioUrl);
-            if (!isPlaying) {
-                 playNextAudio();
-            }
+            if (currentAudio) currentAudio.pause();
+            currentAudio = new Audio(audioUrl);
+            
+            currentAudio.onended = () => {
+                coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
+                isProcessing = false;
+            };
+            currentAudio.play();
         }
     };
     ws.onclose = () => setTimeout(connectWebSocket, 3000);
@@ -78,15 +56,17 @@ function connectWebSocket() {
 
 async function initAudioEngine() {
     try {
+        // Force the browser to use standard media routing instead of communication routing
         const constraints = {
-    audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1
-    }
-};
-const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                channelCount: 1 
+            }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(stream);
         analyser = audioContext.createAnalyser();
@@ -139,8 +119,6 @@ function monitorVolume() {
             // INSTANT INTERRUPT
             if (currentAudio && !currentAudio.paused) {
                 currentAudio.pause();
-                audioQueue = []; // Clear the queue on interrupt
-                isPlaying = false;
                 isProcessing = false;
                 coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
             }
