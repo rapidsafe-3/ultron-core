@@ -1,8 +1,8 @@
 fastapi
 uvicorn
+websockets
 groq
 duckduckgo-search
 pydantic
 firebase-admin
 edge-tts
-python-multipart
