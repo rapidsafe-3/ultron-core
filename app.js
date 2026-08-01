@@ -13,7 +13,7 @@ let isProcessing = false;
 let isAwake = false; 
 let silenceStart = null;
 
-const SILENCE_THRESHOLD = -55; 
+const SILENCE_THRESHOLD = -100; 
 const SILENCE_DURATION = 1200; 
 
 // Force secure websocket connection
