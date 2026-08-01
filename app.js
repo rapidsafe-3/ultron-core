@@ -17,8 +17,7 @@ let silenceStart = null;
 const SILENCE_THRESHOLD = -55; 
 const SILENCE_DURATION = 1200; 
 
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const WS_URL = `${wsProtocol}//${window.location.host}/ws`;
+const WS_URL = `wss://${window.location.host}/ws`;
 
 function connectWebSocket() {
     ws = new WebSocket(WS_URL);
