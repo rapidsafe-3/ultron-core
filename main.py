@@ -87,7 +87,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Wrapped receive_bytes to safely catch disconnects
+            # Safely receive bytes
             try:
                 audio_bytes = await websocket.receive_bytes()
             except WebSocketDisconnect:
@@ -110,7 +110,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         language="en",
                         response_format="json" 
                     )
-                user_text = transcription.text.strip()
+                # Ensure we extract the text correctly whether it returns an object or a dict
+                user_text = transcription.text.strip() if hasattr(transcription, 'text') else transcription.get('text', '').strip()
             except Exception as e:
                 print(f"Transcription error: {e}")
                 user_text = ""
@@ -131,19 +132,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     is_awake = True
                     await websocket.send_json({"type": "status", "state": "awake"})
                     
-                    # Generate Wake Audio
+                    # Generate Wake Audio stream
                     voice = "en-IN-NeerjaNeural"
                     communicate = edge_tts.Communicate("I'm listening, Saaqib.", voice)
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
-                            await websocket.send_bytes(chunk["data"])
-                continue # Do not process chat if she was asleep
+                            await websocket.send_bytes(chunk["data"]) # send_bytes is crucial here
+                continue
             
             if any(cmd in lowered for cmd in ["shut down", "sleep", "go to sleep"]):
                 is_awake = False
                 await websocket.send_json({"type": "status", "state": "sleep"})
                 
-                # Generate Sleep Audio
                 voice = "en-IN-NeerjaNeural" 
                 communicate = edge_tts.Communicate("Going to sleep. Call me if you need anything.", voice)
                 async for chunk in communicate.stream():
@@ -191,20 +191,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
             await websocket.send_json({"type": "response_text", "text": reply_text})
 
-            # Female Indian Voice (Fluent in English, Hindi, Urdu)
+            # Stream speech back to the frontend immediately
             spoken_text = reply_text.replace("Saqib", "Saaqib") 
             voice = "en-IN-NeerjaNeural"
             
-            # Using async streaming instead of saving to a file
             communicate = edge_tts.Communicate(spoken_text, voice)
             
             try:
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
-                         await websocket.send_bytes(chunk["data"])
+                        # CRITICAL: Send raw binary data over WebSocket
+                        await websocket.send_bytes(chunk["data"])
             except Exception as e:
                  print(f"TTS Error: {e}")
 
     except WebSocketDisconnect:
         print("Client disconnected.")
-                    
+                
