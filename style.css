@@ -1,69 +1,68 @@
 :root {
-    --core-base: #00e5ff;
-    --core-glow: rgba(0, 229, 255, 0.6);
-    --bg-color: #050914;
-    --panel-bg: rgba(0, 15, 30, 0.7);
+    --core-base: #ff8c00; /* Deep Orange */
+    --core-highlight: #ffd700; /* Yellow */
+    --bg-color: #050200;
 }
 
 body, html {
     margin: 0; padding: 0; height: 100%;
     background-color: var(--bg-color);
-    font-family: 'Consolas', 'Courier New', monospace;
-    display: flex; flex-direction: column; justify-content: center; align-items: center;
-    color: var(--core-base); overflow: hidden;
-}
-
-.jarvis-container {
-    position: relative;
-    width: 250px; height: 250px;
     display: flex; justify-content: center; align-items: center;
-    margin-bottom: 50px;
+    overflow: hidden; user-select: none;
 }
 
-/* Outer Ring */
-.ring-1 {
-    position: absolute; width: 100%; height: 100%;
-    border: 2px solid var(--core-base); border-radius: 50%;
-    border-top-color: transparent; border-bottom-color: transparent;
-    animation: spin 4s linear infinite;
-    box-shadow: 0 0 15px var(--core-glow);
+/* Invisible overlay for the required first mobile tap */
+#activation-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 100; cursor: pointer;
 }
 
-/* Inner Ring */
-.ring-2 {
-    position: absolute; width: 80%; height: 80%;
-    border: 3px dashed var(--core-base); border-radius: 50%;
-    animation: spin-reverse 6s linear infinite;
-    opacity: 0.7;
+.proton-container {
+    position: relative;
+    width: 300px; height: 300px;
+    display: flex; justify-content: center; align-items: center;
+    transition: all 0.5s ease;
 }
 
-/* Core Center */
+/* Inner Solid Core */
 .core-center {
-    width: 50%; height: 50%;
-    background: radial-gradient(circle, var(--core-base) 10%, transparent 70%);
+    width: 45%; height: 45%;
     border-radius: 50%;
-    box-shadow: 0 0 40px var(--core-glow);
-    transition: all 0.2s ease;
+    background: radial-gradient(circle, var(--core-highlight) 10%, var(--core-base) 80%);
+    box-shadow: 0 0 50px var(--core-base);
+    z-index: 10;
+    transition: all 0.3s ease;
 }
 
-.state-idle .core-center { opacity: 0.3; animation: pulse 3s infinite; }
-.state-listening .core-center { opacity: 1; transform: scale(1.1); box-shadow: 0 0 60px var(--core-base); }
-.state-speaking .core-center { opacity: 1; animation: speak-pulse 0.4s infinite alternate; box-shadow: 0 0 80px var(--core-base); }
-.state-processing .core-center { opacity: 0.8; animation: spin-fast 0.5s infinite; }
+/* Outer Spinning Rings */
+.ring-outer {
+    position: absolute; width: 100%; height: 100%;
+    border: 3px solid transparent;
+    border-top: 3px solid var(--core-highlight);
+    border-bottom: 3px solid var(--core-base);
+    border-radius: 50%;
+    animation: spin 3s linear infinite;
+    filter: drop-shadow(0 0 10px var(--core-highlight));
+}
+
+.ring-inner {
+    position: absolute; width: 75%; height: 75%;
+    border: 2px dashed var(--core-base);
+    border-radius: 50%;
+    animation: spin-reverse 5s linear infinite;
+    opacity: 0.8;
+}
+
+/* State Animations */
+.state-sleep { opacity: 0.3; filter: grayscale(80%); transform: scale(0.9); }
+.state-idle .core-center { animation: breathe 4s infinite alternate; }
+.state-listening .core-center { transform: scale(1.15); box-shadow: 0 0 80px var(--core-highlight); }
+.state-listening .ring-outer { animation: spin 1.5s linear infinite; border-top-color: #fff; }
+.state-processing .core-center { animation: pulse-fast 0.6s infinite; }
+.state-speaking .core-center { animation: audio-wave 0.3s infinite alternate; box-shadow: 0 0 100px var(--core-base); }
 
 @keyframes spin { 100% { transform: rotate(360deg); } }
 @keyframes spin-reverse { 100% { transform: rotate(-360deg); } }
-@keyframes spin-fast { 0% { transform: scale(0.9); opacity: 0.5; } 100% { transform: scale(1.1); opacity: 1; } }
-@keyframes pulse { 0% { transform: scale(0.95); } 50% { transform: scale(1.05); } 100% { transform: scale(0.95); } }
-@keyframes speak-pulse { 0% { transform: scale(1); } 100% { transform: scale(1.15); } }
-
-.terminal {
-    background: var(--panel-bg); border: 1px solid rgba(0, 229, 255, 0.3);
-    padding: 20px; border-radius: 10px; width: 85%; max-width: 400px;
-    text-align: center; backdrop-filter: blur(5px);
-}
-
-#status-text { font-size: 1.2rem; margin-bottom: 15px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; }
-#transcript-text { font-size: 0.9rem; color: #a0d8ef; min-height: 40px; }
-.mic-btn { margin-top: 20px; padding: 12px 25px; background: transparent; color: var(--core-base); border: 1px solid var(--core-base); border-radius: 5px; cursor: pointer; text-transform: uppercase; font-weight: bold; transition: 0.3s; }
-.mic-btn:active { background: var(--core-base); color: #000; }
+@keyframes breathe { 0% { transform: scale(0.95); opacity: 0.8; } 100% { transform: scale(1.05); opacity: 1; } }
+@keyframes pulse-fast { 0% { transform: scale(0.9); } 50% { transform: scale(1.1); } 100% { transform: scale(0.9); } }
+@keyframes audio-wave { 0% { transform: scale(1); } 100% { transform: scale(1.2); } }
