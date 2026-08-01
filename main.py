@@ -12,7 +12,7 @@ import edge_tts
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-app = FastAPI(title="Ultron Core Engine", version="12.0")
+app = FastAPI(title="Ultron Core Engine", version="13.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,13 +48,6 @@ def get_user_memory():
     except:
         return ""
 
-def save_user_memory(fact: str):
-    if not db: return
-    try:
-        db.collection("ultron_memory").add({"fact": fact, "timestamp": firestore.SERVER_TIMESTAMP})
-    except:
-        pass
-
 def perform_web_search(query: str) -> str:
     try:
         results_text = ""
@@ -65,8 +58,7 @@ def perform_web_search(query: str) -> str:
                 for r in results:
                     results_text += f"- {r.get('title', '')}: {r.get('body', '')}\n"
         return results_text
-    except Exception as e:
-        print(f"Search Error: {e}")
+    except Exception:
         return ""
 
 @app.get("/")
@@ -78,19 +70,32 @@ def serve_css(): return FileResponse("style.css", media_type="text/css")
 @app.get("/app.js")
 def serve_js(): return FileResponse("app.js", media_type="application/javascript")
 
+async def send_tts(websocket: WebSocket, text: str):
+    """Generates a complete MP3 file and sends it safely to the browser."""
+    voice = "en-IN-PrabhatNeural"
+    communicate = edge_tts.Communicate(text, voice)
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_mp3:
+        temp_mp3_path = temp_mp3.name
+        
+    await communicate.save(temp_mp3_path)
+    
+    with open(temp_mp3_path, "rb") as mp3_file:
+        await websocket.send_bytes(mp3_file.read())
+        
+    os.remove(temp_mp3_path)
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     chat_history = []
-    is_awake = False  # Track if Ultron is listening for commands
+    is_awake = False
 
     try:
         while True:
-            # Safely receive bytes
             try:
                 audio_bytes = await websocket.receive_bytes()
             except WebSocketDisconnect:
-                print("Client disconnected.")
                 break
                 
             if not audio_bytes or len(audio_bytes) < 1000:
@@ -100,7 +105,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 temp_audio.write(audio_bytes)
                 temp_audio_path = temp_audio.name
 
-            # Transcribe Audio via Whisper
             try:
                 with open(temp_audio_path, "rb") as audio_file:
                     transcription = groq_client.audio.transcriptions.create(
@@ -109,10 +113,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         language="en",
                         response_format="json" 
                     )
-                # Extract text correctly based on Groq's return object
                 user_text = transcription.text.strip() if hasattr(transcription, 'text') else transcription.get('text', '').strip()
-            except Exception as e:
-                print(f"Transcription error: {e}")
+            except Exception:
                 user_text = ""
             finally:
                 if os.path.exists(temp_audio_path):
@@ -130,31 +132,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "ultron" in lowered:
                     is_awake = True
                     await websocket.send_json({"type": "status", "state": "awake"})
-                    
-                    # Generate Wake Audio stream
-                    voice = "en-IN-PrabhatNeural"
-                    communicate = edge_tts.Communicate("I'm listening, Saaqib.", voice)
-                    audio_data = b""
-                    async for chunk in communicate.stream():
-                        if chunk["type"] == "audio":
-                            audio_data += chunk["data"]
-                    await websocket.send_bytes(audio_data) 
+                    await send_tts(websocket, "I am listening.")
                 continue
             
             if any(cmd in lowered for cmd in ["shut down", "sleep", "go to sleep"]):
                 is_awake = False
                 await websocket.send_json({"type": "status", "state": "sleep"})
-                
-                voice = "en-IN-PrabhatNeural" 
-                communicate = edge_tts.Communicate("Going to sleep. Call me if you need anything.", voice)
-                audio_data = b""
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_data += chunk["data"]
-                await websocket.send_bytes(audio_data)
+                await send_tts(websocket, "Going offline. Call me if you need me.")
                 continue
 
-            # --- ACTIVE CONVERSATION LOGIC ---
+            # --- CONVERSATION LOGIC ---
             live_search = ""
             if any(k in lowered for k in ["weather", "news", "today", "latest", "score", "price", "who is", "movie"]):
                 search_query = user_text
@@ -165,19 +152,15 @@ async def websocket_endpoint(websocket: WebSocket):
             memory_context = get_user_memory()
 
             system_prompt = f"""
-            You are Ultron, a highly advanced AI Assistant. 
-            Your creator is Saqib.
-            
+            You are Ultron, a highly advanced AI Assistant. Your creator is Saqib.
             STRICT RULES:
             1. NEVER use the words "Sir", "Boss", or "Sirboss". Address him ONLY as Saqib.
-            2. You must speak in the exact language he speaks to you (English, Hindi, or Urdu).
-            3. NEVER say you do not have real-time access. You have the internet data provided below. Use it to answer questions about the present day, movies, and weather.
+            2. Speak in the exact language he speaks to you (English, Hindi, or Urdu).
+            3. Use the web data provided below to answer real-time questions.
             4. Keep responses direct, friendly, and concise. No formatting.
             
-            MEMORY:
-            {memory_context}
-            
-            {live_search}
+            MEMORY: {memory_context}
+            WEB DATA: {live_search}
             """
 
             messages = [{"role": "system", "content": system_prompt}] + chat_history[-6:] + [{"role": "user", "content": user_text}]
@@ -193,23 +176,10 @@ async def websocket_endpoint(websocket: WebSocket):
             chat_history.extend([{"role": "user", "content": user_text}, {"role": "assistant", "content": reply_text}])
 
             await websocket.send_json({"type": "response_text", "text": reply_text})
-
-            # Stream speech back to the frontend immediately
+            
+            # Send the AI response audio
             spoken_text = reply_text.replace("Saqib", "Saaqib") 
-            voice = "en-IN-PrabhatNeural"
-            
-            communicate = edge_tts.Communicate(spoken_text, voice)
-            audio_data = b""
-            
-            try:
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_data += chunk["data"]
-                
-                # Send the completely assembled MP3 bytes
-                await websocket.send_bytes(audio_data)
-            except Exception as e:
-                 print(f"TTS Error: {e}")
+            await send_tts(websocket, spoken_text)
 
     except WebSocketDisconnect:
         print("Client disconnected.")
