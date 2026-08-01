@@ -46,16 +46,24 @@ function playNextAudio() {
 
 function connectWebSocket() {
     ws = new WebSocket(WS_URL);
+    
+    // Tell the WebSocket we expect ArrayBuffer (binary) data
+    ws.binaryType = "arraybuffer"; 
+    
     ws.onmessage = async (event) => {
+        // If the data is a string, it's JSON (status or transcript)
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
             if (data.type === "status") {
                 isAwake = (data.state === "awake");
                 coreContainer.className = isAwake ? "proton-container state-idle" : "proton-container state-sleep";
             }
-        } else {
-            // Audio Playback streaming handling
+        } 
+        // If the data is an ArrayBuffer, it is the raw audio stream from edge-tts
+        else if (event.data instanceof ArrayBuffer) {
             coreContainer.className = "proton-container state-speaking";
+            
+            // Convert the binary ArrayBuffer to a playable Blob
             const audioBlob = new Blob([event.data], { type: 'audio/mp3' });
             const audioUrl = URL.createObjectURL(audioBlob);
             
