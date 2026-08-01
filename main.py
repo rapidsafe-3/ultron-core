@@ -1,7 +1,6 @@
 import os
 import json
 import tempfile
-import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -12,7 +11,7 @@ import edge_tts
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-app = FastAPI(title="Ultron Core - JARVIS Edition", version="7.0")
+app = FastAPI(title="Ultron Core - JARVIS Edition", version="8.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,16 +56,15 @@ def save_user_memory(fact: str):
     except:
         pass
 
+# Enhanced Web Search for Real World Data
 def perform_web_search(query: str) -> str:
-    search_query = query
-    if "weather" in query.lower() and "bangalore" not in query.lower():
-        search_query = "current weather report Bangalore"
     try:
-        results = DDGS().text(search_query, max_results=3)
+        results = DDGS().text(query, max_results=4)
         if results:
             return "\n\nLIVE WEB DATA:\n" + "\n".join([f"- {r['title']}: {r['body']}" for r in results])
         return ""
-    except:
+    except Exception as e:
+        print(f"Search Error: {e}")
         return ""
 
 @app.get("/")
@@ -78,7 +76,6 @@ def serve_css(): return FileResponse("style.css", media_type="text/css")
 @app.get("/app.js")
 def serve_js(): return FileResponse("app.js", media_type="application/javascript")
 
-# --- ULTRA-FAST WEBSOCKET PIPELINE ---
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -86,52 +83,34 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # 1. Receive instant audio bytes from phone
-            audio_bytes = await websocket.receive_bytes()
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
-                temp_audio.write(audio_bytes)
-                temp_audio_path = temp_audio.name
-
-            # 2. Instant Transcription (Groq Whisper)
-            try:
-                with open(temp_audio_path, "rb") as file:
-                    transcription = groq_client.audio.transcriptions.create(
-                        file=(temp_audio_path, file.read()),
-                        model="whisper-large-v3",
-                        language="en"
-                    )
-                user_text = transcription.text.strip()
-            except Exception as e:
-                user_text = ""
-            finally:
-                os.remove(temp_audio_path)
-
-            if not user_text:
+            # 1. Receive text query from frontend
+            data = await websocket.receive_json()
+            if data.get("type") != "text_query":
                 continue
-
-            # Send transcribed text to UI instantly
-            await websocket.send_json({"type": "transcript", "text": user_text})
-
-            # 3. Brain Processing (Groq Llama 3)
+                
+            user_text = data.get("text", "")
+            
+            # 2. Pull Real World Data (Search everything by default for maximum accuracy)
+            live_search = perform_web_search(user_text) 
             memory_context = get_user_memory()
-            live_search = perform_web_search(user_text) if any(k in user_text.lower() for k in ["weather", "news", "today", "score"]) else ""
 
+            # 3. Process with Brain
             system_prompt = f"""
-            You are Ultron, a highly advanced, JARVIS-like AI Assistant.
-            Your creator is Mohammed Saqib Ahmed (Saqib), an 18-year-old developer in Bangalore.
+            You are Ultron, a highly advanced, proactive AI Assistant. 
+            Your creator is Saqib.
             
             RULES:
-            - Respond instantly, confidently, and concisely (1-3 sentences).
-            - Do not ask follow-up questions for news/weather; just deliver the facts.
-            - No markdown, no emojis.
+            - Respond instantly and directly.
+            - Speak naturally, like a brilliant human partner.
+            - Rely heavily on the LIVE WEB DATA provided to answer questions accurately. 
+            - Keep answers punchy and conversational (1-3 sentences).
             
-            MEMORY:
+            MEMORY & CONTEXT:
             {memory_context}
             {live_search}
             """
 
-            messages = [{"role": "system", "content": system_prompt}] + CHAT_HISTORY[-4:] + [{"role": "user", "content": user_text}]
+            messages = [{"role": "system", "content": system_prompt}] + CHAT_HISTORY[-6:] + [{"role": "user", "content": user_text}]
             
             chat_completion = groq_client.chat.completions.create(
                 messages=messages,
@@ -142,6 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
             
             reply_text = chat_completion.choices[0].message.content.strip()
 
+            # Memory Tag check
             if "[REMEMBER:" in reply_text:
                 fact = reply_text.split("[REMEMBER:")[1].split("]")[0].strip()
                 save_user_memory(fact)
@@ -164,8 +144,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 mp3_bytes = audio_file.read()
             os.remove(temp_mp3_path)
 
-            # Stream audio bytes directly back to the phone
+            # Stream audio bytes directly back
             await websocket.send_bytes(mp3_bytes)
 
     except WebSocketDisconnect:
         print("Client disconnected.")
+        
