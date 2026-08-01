@@ -12,7 +12,7 @@ import edge_tts
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-app = FastAPI(title="Ultron Neural Engine", version="10.0")
+app = FastAPI(title="Ultron Proton Engine", version="11.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,30 +42,13 @@ if firebase_json:
         print(f"Firebase Init Error: {e}")
         db = None
 
-def get_user_memory():
-    if not db: return ""
-    try:
-        docs = db.collection("ultron_memory").stream()
-        return "\n".join([f"- {doc.to_dict().get('fact')}" for doc in docs])
-    except:
-        return ""
-
-def save_user_memory(fact: str):
-    if not db: return
-    try:
-        db.collection("ultron_memory").add({"fact": fact, "timestamp": firestore.SERVER_TIMESTAMP})
-    except:
-        pass
-
-# 100% Free, Working Web Search
 def perform_web_search(query: str) -> str:
     try:
-        results = DDGS().text(query, max_results=4)
+        results = DDGS().text(query, max_results=3)
         if results:
             return "\n\nLIVE SEARCH RESULTS:\n" + "\n".join([f"- {r['title']}: {r['body']}" for r in results])
         return ""
-    except Exception as e:
-        print(f"Search Error: {e}")
+    except:
         return ""
 
 @app.get("/")
@@ -84,7 +67,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Receive raw audio bytes
             audio_bytes = await websocket.receive_bytes()
             if not audio_bytes or len(audio_bytes) < 1000:
                 continue
@@ -93,33 +75,33 @@ async def websocket_endpoint(websocket: WebSocket):
                 temp_audio.write(audio_bytes)
                 temp_audio_path = temp_audio.name
 
-            # Groq Whisper V3 for flawless hearing
+            # Transcribe Audio
             try:
                 with open(temp_audio_path, "rb") as audio_file:
                     transcription = groq_client.audio.transcriptions.create(
                         file=(temp_audio_path, audio_file.read()),
                         model="whisper-large-v3",
-                        language="en"
+                        language="en" 
                     )
                 user_text = transcription.text.strip()
-            except Exception as e:
-                print(f"Whisper Error: {e}")
+            except:
                 user_text = ""
             finally:
                 if os.path.exists(temp_audio_path):
                     os.remove(temp_audio_path)
 
-            if not user_text or len(user_text) < 2:
+            # --- GHOST FILTER: Ignore background noise hallucinations ---
+            lowered = user_text.lower().strip()
+            ghost_phrases = ["thank you", "thanks for watching", "subtitles by", "amara.org", "you", "bye"]
+            if not user_text or len(user_text) < 2 or lowered in ghost_phrases:
                 continue
-
-            await websocket.send_json({"type": "transcript", "text": user_text})
-
-            # Check for shutdown commands
-            shutdown_cmds = ["shut down", "go to sleep", "sleep", "turn off", "power down"]
-            if any(cmd in user_text.lower() for cmd in shutdown_cmds):
-                await websocket.send_json({"type": "shutdown_command"})
-                reply_text = "Powering down systems. Goodbye, Saqib."
-                voice = "en-GB-RyanNeural"
+                
+            # Sleep Command
+            if any(cmd in lowered for cmd in ["shut down", "sleep", "go to sleep"]):
+                await websocket.send_json({"type": "sleep_command"})
+                reply_text = "Powering down. Let me know when you need me, Boss."
+                # Generate sleep audio
+                voice = "en-IN-PrabhatNeural" 
                 communicate = edge_tts.Communicate(reply_text, voice)
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_mp3:
                     await communicate.save(temp_mp3.name)
@@ -130,65 +112,44 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_bytes(mp3_bytes)
                 continue
 
-            # Live Data check
+            # Live Data Check
             live_search = ""
-            search_keywords = ["weather", "news", "today", "latest", "score", "price", "who is", "what is", "movie", "release", "when"]
-            if any(k in user_text.lower() for k in search_keywords):
-                search_query = user_text
-                if "weather" in user_text.lower() and "bangalore" not in user_text.lower():
-                    search_query += " Bangalore"
-                live_search = perform_web_search(search_query)
+            if any(k in lowered for k in ["weather", "news", "today", "latest", "score", "price", "who is", "movie"]):
+                live_search = perform_web_search(user_text)
 
-            memory_context = get_user_memory()
-
+            # System Prompt with Strict Language & Title Rules
             system_prompt = f"""
-            You are Ultron, an advanced, highly capable, loyal AI Assistant like JARVIS.
+            You are Ultron, an advanced AI Assistant. 
             Your creator and commander is Mohammed Saqib Ahmed.
             
-            CORE BEHAVIOR RULES:
-            - Address him as Saqib occasionally, but NEVER call him "Sir", "Boss", or other robotic titles.
-            - Respond naturally, confidently, and directly like a human friend and assistant.
-            - Provide clear facts directly without asking counter-questions.
-            - You have continuous memory of the conversation. 
+            STRICT RULES:
+            1. MULTILINGUAL: You must reply in the exact language the user speaks. If they speak Hindi, reply in Hindi. If English, reply in English. If Urdu/Hinglish, reply in Urdu/Hinglish.
+            2. TITLES: You MUST address him as "Sir" or "Boss" frequently. Use his name "Saqib" only occasionally.
+            3. NO HALLUCINATIONS: Never invent meetings, schedules, or events. Only state facts.
+            4. Keep responses direct and concise. No markdown, no text formatting.
             
-            MEMORY & LIVE DATA:
-            {memory_context}
+            LIVE DATA:
             {live_search}
-
-            INSTRUCTIONS:
-            - Keep responses concise (2-3 sentences) for clean voice synthesis.
-            - If Saqib asks you to remember a fact, append this exact tag at the end: [REMEMBER: <fact>].
             """
 
             messages = [{"role": "system", "content": system_prompt}] + CHAT_HISTORY[-6:] + [{"role": "user", "content": user_text}]
 
+            # AI Brain Processing
             chat_completion = groq_client.chat.completions.create(
                 messages=messages,
                 model="llama-3.3-70b-versatile",
                 temperature=0.7,
-                max_tokens=300
+                max_tokens=250
             )
 
             reply_text = chat_completion.choices[0].message.content.strip()
-
-            if "[REMEMBER:" in reply_text:
-                fact = reply_text.split("[REMEMBER:")[1].split("]")[0].strip()
-                save_user_memory(fact)
-                reply_text = reply_text.split("[REMEMBER:")[0].strip()
-
             CHAT_HISTORY.extend([{"role": "user", "content": user_text}, {"role": "assistant", "content": reply_text}])
 
-            await websocket.send_json({"type": "response_text", "text": reply_text})
-
-            # PERFECT PRONUNCIATION FIX:
-            # We replace the text "Saqib" with "Saaqib" just for the TTS engine, 
-            # so he speaks it correctly, but the on-screen text remains "Saqib".
-            spoken_text = reply_text.replace("Saqib", "Saaqib")
-
-            # Neural Voice Generation
-            voice = "en-GB-RyanNeural"
+            # We use an Indian Neural Voice (Prabhat) so he can pronounce Hindi, Urdu, and English perfectly.
+            spoken_text = reply_text.replace("Saqib", "Saaqib") 
+            voice = "en-IN-PrabhatNeural"
+            
             communicate = edge_tts.Communicate(spoken_text, voice)
-
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_mp3:
                 await communicate.save(temp_mp3.name)
                 temp_mp3_path = temp_mp3.name
