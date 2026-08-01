@@ -1,6 +1,6 @@
 :root {
-    --core-base: #ff8c00; /* Deep Orange */
-    --core-highlight: #ffd700; /* Yellow */
+    --core-base: #ff8c00; 
+    --core-highlight: #ffd700; 
     --bg-color: #050200;
 }
 
@@ -11,7 +11,6 @@ body, html {
     overflow: hidden; user-select: none;
 }
 
-/* Invisible overlay for the required first mobile tap */
 #activation-overlay {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     z-index: 100; cursor: pointer;
@@ -24,7 +23,6 @@ body, html {
     transition: all 0.5s ease;
 }
 
-/* Inner Solid Core */
 .core-center {
     width: 45%; height: 45%;
     border-radius: 50%;
@@ -34,7 +32,6 @@ body, html {
     transition: all 0.3s ease;
 }
 
-/* Outer Spinning Rings */
 .ring-outer {
     position: absolute; width: 100%; height: 100%;
     border: 3px solid transparent;
@@ -53,7 +50,6 @@ body, html {
     opacity: 0.8;
 }
 
-/* State Animations */
 .state-sleep { opacity: 0.3; filter: grayscale(80%); transform: scale(0.9); }
 .state-idle .core-center { animation: breathe 4s infinite alternate; }
 .state-listening .core-center { transform: scale(1.15); box-shadow: 0 0 80px var(--core-highlight); }
